@@ -1,11 +1,11 @@
+
 using KeyValueStore.Application.Tests.Fakes;
 using KeyValueStore.Application.UseCases;
-using KeyValueStore.Domain.Aggregates;
 using Xunit;
 
 namespace KeyValueStore.Application.Tests;
 
-public class KeyValueUseCaseTests
+public class SetEntryUseCaseTests
 {
     [Fact]
     public void Set_ShouldPassValuesToRepository()
@@ -24,6 +24,7 @@ public class KeyValueUseCaseTests
         Assert.Equal("Ali", call.Value.Value);
         Assert.Equal(now, call.Value.Now);
         Assert.Null(call.Value.ExpiresAt);
+        Assert.Null(call.Value.Metadata);
     }
 
     [Fact]
@@ -83,65 +84,6 @@ public class KeyValueUseCaseTests
         Assert.Null(repository.LastUpsert);
     }
 
-    [Fact]
-    public void Get_ShouldReturnExistingEntry()
-    {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new GetEntryUseCase(repository);
-
-        var entry = new KeyValueEntry(
-            "name",
-            "Ali",
-            DateTimeOffset.UnixEpoch);
-
-        repository.Save("userA", entry);
-
-        var result = useCase.Execute("userA", "name");
-
-        Assert.NotNull(result);
-        Assert.Equal("Ali", result.Value);
-    }
-
-    [Fact]
-    public void Get_ShouldReturnNullForMissingKey()
-    {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new GetEntryUseCase(repository);
-
-        var result = useCase.Execute("userA", "unknown");
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void Delete_ShouldRemoveExistingEntry()
-    {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new DeleteEntryUseCase(repository);
-
-        var entry = new KeyValueEntry(
-            "name",
-            "Ali",
-            DateTimeOffset.UnixEpoch);
-
-        repository.Save("userA", entry);
-
-        bool deleted = useCase.Execute("userA", "name");
-
-        Assert.True(deleted);
-        Assert.Null(repository.Get("userA", "name"));
-    }
-
-    [Fact]
-    public void Delete_ShouldReturnFalseForMissingKey()
-    {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new DeleteEntryUseCase(repository);
-
-        bool deleted = useCase.Execute("userA", "unknown");
-
-        Assert.False(deleted);
-    }
     [Fact]
     public void Set_ShouldForwardMetadataToRepository()
     {
