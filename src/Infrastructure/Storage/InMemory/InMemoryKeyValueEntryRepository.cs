@@ -50,7 +50,8 @@ public sealed class InMemoryKeyValueEntryRepository
         string keyspace,
         string key,
         string value,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        DateTimeOffset? expiresAt = null)
     {
         lock (_sync)
         {
@@ -64,11 +65,15 @@ public sealed class InMemoryKeyValueEntryRepository
                     : now;
 
                 entry.UpdateValue(value, updateTime);
+                entry.UpdateExpiration(expiresAt);
             }
             else
             {
-                _entries[address] =
-                    new KeyValueEntry(key, value, now);
+                _entries[address] = new KeyValueEntry(
+                    key,
+                    value,
+                    now,
+                    expiresAt);
             }
         }
     }

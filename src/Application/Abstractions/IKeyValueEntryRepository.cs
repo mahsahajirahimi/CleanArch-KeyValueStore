@@ -14,5 +14,6 @@ public interface IKeyValueEntryRepository
         string keyspace,
         string key,
         string value,
-        DateTimeOffset now);
+        DateTimeOffset now,
+        DateTimeOffset? expiresAt = null);
 }

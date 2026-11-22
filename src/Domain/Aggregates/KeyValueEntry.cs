@@ -7,7 +7,7 @@ public class KeyValueEntry
 
     public DateTimeOffset CreatedAt { get; }
     public DateTimeOffset UpdatedAt { get; private set; }
-    public DateTimeOffset? ExpiresAt { get; }
+    public DateTimeOffset? ExpiresAt { get; private set; }
 
     public KeyValueEntry(
         string key,
@@ -38,5 +38,10 @@ public class KeyValueEntry
     public bool IsExpired(DateTimeOffset now)
     {
         return ExpiresAt.HasValue && now >= ExpiresAt.Value;
+    }
+
+    public void UpdateExpiration(DateTimeOffset? expiresAt)
+    {
+        ExpiresAt = expiresAt;
     }
 }

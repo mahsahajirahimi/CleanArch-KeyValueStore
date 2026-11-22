@@ -8,6 +8,14 @@ public class FakeKeyValueEntryRepository : IKeyValueEntryRepository
     private readonly Dictionary<(string Keyspace, string Key), KeyValueEntry>
         _entries = new();
 
+    public (
+        string Keyspace,
+        string Key,
+        string Value,
+        DateTimeOffset Now,
+        DateTimeOffset? ExpiresAt
+    )? LastUpsert { get; private set; }
+
     public KeyValueEntry? Get(string keyspace, string key)
     {
         return _entries.GetValueOrDefault((keyspace, key));
@@ -27,24 +35,9 @@ public class FakeKeyValueEntryRepository : IKeyValueEntryRepository
         string keyspace,
         string key,
         string value,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        DateTimeOffset? expiresAt = null)
     {
-        var entry = Get(keyspace, key);
-
-        if (entry is null || entry.IsExpired(now))
-        {
-            Save(
-                keyspace,
-                new KeyValueEntry(key, value, now));
-
-            return;
-        }
-
-        var updateTime = now < entry.UpdatedAt
-            ? entry.UpdatedAt
-            : now;
-
-        entry.UpdateValue(value, updateTime);
-        Save(keyspace, entry);
+        LastUpsert = (keyspace, key, value, now, expiresAt);
     }
 }

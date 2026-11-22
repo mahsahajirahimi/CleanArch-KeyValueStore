@@ -1,5 +1,6 @@
 using KeyValueStore.Application.Tests.Fakes;
 using KeyValueStore.Application.UseCases;
+using KeyValueStore.Domain.Aggregates;
 using Xunit;
 
 namespace KeyValueStore.Application.Tests;
@@ -7,7 +8,7 @@ namespace KeyValueStore.Application.Tests;
 public class KeyValueUseCaseTests
 {
     [Fact]
-    public void Set_ShouldCreateNewEntry()
+    public void Set_ShouldPassValuesToRepository()
     {
         var repository = new FakeKeyValueEntryRepository();
         var useCase = new SetEntryUseCase(repository);
@@ -15,45 +16,90 @@ public class KeyValueUseCaseTests
 
         useCase.Execute("userA", "name", "Ali", now);
 
-        var entry = repository.Get("userA", "name");
+        var call = repository.LastUpsert;
 
-        Assert.NotNull(entry);
-        Assert.Equal("Ali", entry.Value);
-        Assert.Equal(now, entry.CreatedAt);
+        Assert.True(call.HasValue);
+        Assert.Equal("userA", call.Value.Keyspace);
+        Assert.Equal("name", call.Value.Key);
+        Assert.Equal("Ali", call.Value.Value);
+        Assert.Equal(now, call.Value.Now);
+        Assert.Null(call.Value.ExpiresAt);
     }
 
     [Fact]
-    public void Set_ShouldUpdateExistingEntry()
+    public void Set_ShouldCalculateExpirationFromTtl()
     {
         var repository = new FakeKeyValueEntryRepository();
         var useCase = new SetEntryUseCase(repository);
         var now = DateTimeOffset.UnixEpoch;
 
-        useCase.Execute("userA", "name", "Ali", now);
-        useCase.Execute("userA", "name", "Sara", now.AddMinutes(5));
+        useCase.Execute(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            ttlSeconds: 300);
 
-        var entry = repository.Get("userA", "name");
+        var call = repository.LastUpsert;
 
-        Assert.NotNull(entry);
-        Assert.Equal("Sara", entry.Value);
-        Assert.Equal(now, entry.CreatedAt);
-        Assert.Equal(now.AddMinutes(5), entry.UpdatedAt);
+        Assert.True(call.HasValue);
+        Assert.Equal(
+            now.AddMinutes(5),
+            call.Value.ExpiresAt);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void Set_ShouldRejectInvalidTtl(int ttlSeconds)
+    {
+        var repository = new FakeKeyValueEntryRepository();
+        var useCase = new SetEntryUseCase(repository);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            useCase.Execute(
+                "userA",
+                "name",
+                "Ali",
+                DateTimeOffset.UnixEpoch,
+                ttlSeconds));
+
+        Assert.Null(repository.LastUpsert);
+    }
+
+    [Fact]
+    public void Set_ShouldRejectEmptyKeyspace()
+    {
+        var repository = new FakeKeyValueEntryRepository();
+        var useCase = new SetEntryUseCase(repository);
+
+        Assert.Throws<ArgumentException>(() =>
+            useCase.Execute(
+                "",
+                "name",
+                "Ali",
+                DateTimeOffset.UnixEpoch));
+
+        Assert.Null(repository.LastUpsert);
     }
 
     [Fact]
     public void Get_ShouldReturnExistingEntry()
     {
         var repository = new FakeKeyValueEntryRepository();
-        var setUseCase = new SetEntryUseCase(repository);
-        var getUseCase = new GetEntryUseCase(repository);
+        var useCase = new GetEntryUseCase(repository);
 
-        setUseCase.Execute(
-            "userA", "name", "Ali", DateTimeOffset.UnixEpoch);
+        var entry = new KeyValueEntry(
+            "name",
+            "Ali",
+            DateTimeOffset.UnixEpoch);
 
-        var entry = getUseCase.Execute("userA", "name");
+        repository.Save("userA", entry);
 
-        Assert.NotNull(entry);
-        Assert.Equal("Ali", entry.Value);
+        var result = useCase.Execute("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Ali", result.Value);
     }
 
     [Fact]
@@ -71,13 +117,16 @@ public class KeyValueUseCaseTests
     public void Delete_ShouldRemoveExistingEntry()
     {
         var repository = new FakeKeyValueEntryRepository();
-        var setUseCase = new SetEntryUseCase(repository);
-        var deleteUseCase = new DeleteEntryUseCase(repository);
+        var useCase = new DeleteEntryUseCase(repository);
 
-        setUseCase.Execute(
-            "userA", "name", "Ali", DateTimeOffset.UnixEpoch);
+        var entry = new KeyValueEntry(
+            "name",
+            "Ali",
+            DateTimeOffset.UnixEpoch);
 
-        bool deleted = deleteUseCase.Execute("userA", "name");
+        repository.Save("userA", entry);
+
+        bool deleted = useCase.Execute("userA", "name");
 
         Assert.True(deleted);
         Assert.Null(repository.Get("userA", "name"));

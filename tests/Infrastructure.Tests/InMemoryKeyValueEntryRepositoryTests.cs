@@ -209,4 +209,109 @@ public class InMemoryKeyValueEntryRepositoryTests
         Assert.Equal(now, result.CreatedAt);
         Assert.Equal(now.AddTicks(500), result.UpdatedAt);
     }
+
+    [Fact]
+    public void Upsert_ShouldStoreExpiration()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.AddMinutes(10);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            expiresAt);
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal(expiresAt, result.ExpiresAt);
+        Assert.False(result.IsExpired(now.AddMinutes(9)));
+        Assert.True(result.IsExpired(now.AddMinutes(10)));
+    }
+
+    [Fact]
+    public void Upsert_ShouldReplaceExistingExpiration()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UtcNow;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            now.AddMinutes(10));
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Sara",
+            now.AddMinutes(1),
+            now.AddMinutes(30));
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Sara", result.Value);
+        Assert.Equal(now.AddMinutes(30), result.ExpiresAt);
+        Assert.Equal(now, result.CreatedAt);
+    }
+
+    [Fact]
+    public void Upsert_ShouldClearExpirationWhenOmitted()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UtcNow;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            now.AddMinutes(10));
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Sara",
+            now.AddMinutes(1));
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Sara", result.Value);
+        Assert.Null(result.ExpiresAt);
+    }
+
+    [Fact]
+    public void Upsert_ShouldRecreateExpiredEntry()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UtcNow;
+
+        var expiredEntry = new KeyValueEntry(
+            "name",
+            "Old",
+            now.AddMinutes(-10),
+            now.AddMinutes(-5));
+
+        repository.Save("userA", expiredEntry);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "New",
+            now,
+            now.AddMinutes(20));
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("New", result.Value);
+        Assert.Equal(now, result.CreatedAt);
+        Assert.Equal(now.AddMinutes(20), result.ExpiresAt);
+    }
 }
