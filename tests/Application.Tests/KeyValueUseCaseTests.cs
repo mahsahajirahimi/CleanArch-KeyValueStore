@@ -142,4 +142,42 @@ public class KeyValueUseCaseTests
 
         Assert.False(deleted);
     }
+    [Fact]
+    public void Set_ShouldForwardMetadataToRepository()
+    {
+        var repository = new FakeKeyValueEntryRepository();
+        var useCase = new SetEntryUseCase(repository);
+        var now = DateTimeOffset.UnixEpoch;
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["department"] = "engineering",
+            ["environment"] = "development"
+        };
+
+        useCase.Execute(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            metadata: metadata);
+
+        var call = repository.LastUpsert;
+
+        Assert.True(call.HasValue);
+        Assert.Equal("userA", call.Value.Keyspace);
+        Assert.Equal("name", call.Value.Key);
+        Assert.Equal("Ali", call.Value.Value);
+
+        var passedMetadata = call.Value.Metadata;
+
+        Assert.NotNull(passedMetadata);
+        Assert.Equal(2, passedMetadata.Count);
+        Assert.Equal(
+            "engineering",
+            passedMetadata["department"]);
+        Assert.Equal(
+            "development",
+            passedMetadata["environment"]);
+    }
 }

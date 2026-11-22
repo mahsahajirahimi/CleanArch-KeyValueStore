@@ -13,7 +13,8 @@ public class FakeKeyValueEntryRepository : IKeyValueEntryRepository
         string Key,
         string Value,
         DateTimeOffset Now,
-        DateTimeOffset? ExpiresAt
+        DateTimeOffset? ExpiresAt,
+        IReadOnlyDictionary<string, string>? Metadata
     )? LastUpsert { get; private set; }
 
     public KeyValueEntry? Get(string keyspace, string key)
@@ -36,8 +37,17 @@ public class FakeKeyValueEntryRepository : IKeyValueEntryRepository
         string key,
         string value,
         DateTimeOffset now,
-        DateTimeOffset? expiresAt = null)
+        DateTimeOffset? expiresAt = null,
+        IReadOnlyDictionary<string, string>? metadata = null)
     {
-        LastUpsert = (keyspace, key, value, now, expiresAt);
+        LastUpsert = (
+            keyspace,
+            key,
+            value,
+            now,
+            expiresAt,
+            metadata is null
+                ? null
+                : new Dictionary<string, string>(metadata));
     }
 }

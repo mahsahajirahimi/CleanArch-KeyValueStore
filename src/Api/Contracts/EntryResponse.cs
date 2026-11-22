@@ -6,4 +6,5 @@ public sealed record EntryResponse(
     string Value,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    DateTimeOffset? ExpiresAt);
+    DateTimeOffset? ExpiresAt,
+    IReadOnlyDictionary<string, string> Metadata);

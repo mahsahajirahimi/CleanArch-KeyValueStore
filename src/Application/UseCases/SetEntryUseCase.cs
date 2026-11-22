@@ -16,7 +16,8 @@ public class SetEntryUseCase
         string key,
         string value,
         DateTimeOffset now,
-        int? ttlSeconds = null)
+        int? ttlSeconds = null,
+        IReadOnlyDictionary<string, string>? metadata = null)
     {
         if (string.IsNullOrWhiteSpace(keyspace))
             throw new ArgumentException(
@@ -41,6 +42,7 @@ public class SetEntryUseCase
             key,
             value,
             now,
-            expiresAt);
+            expiresAt,
+            metadata);
     }
 }

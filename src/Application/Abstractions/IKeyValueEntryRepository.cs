@@ -15,5 +15,6 @@ public interface IKeyValueEntryRepository
         string key,
         string value,
         DateTimeOffset now,
-        DateTimeOffset? expiresAt = null);
+        DateTimeOffset? expiresAt = null,
+        IReadOnlyDictionary<string, string>? metadata = null);
 }

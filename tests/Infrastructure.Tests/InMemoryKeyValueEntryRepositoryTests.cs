@@ -314,4 +314,181 @@ public class InMemoryKeyValueEntryRepositoryTests
         Assert.Equal(now, result.CreatedAt);
         Assert.Equal(now.AddMinutes(20), result.ExpiresAt);
     }
+
+    [Fact]
+    public void Upsert_ShouldStoreMetadata()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["department"] = "engineering"
+        };
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            metadata: metadata);
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Ali", result.Value);
+        Assert.Equal(
+            "engineering",
+            result.Metadata["department"]);
+    }
+
+    [Fact]
+    public void Upsert_ShouldReplaceExistingMetadata()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            metadata: new Dictionary<string, string>
+            {
+                ["department"] = "engineering",
+                ["environment"] = "development"
+            });
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Sara",
+            now.AddMinutes(1),
+            metadata: new Dictionary<string, string>
+            {
+                ["department"] = "finance"
+            });
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Sara", result.Value);
+        Assert.Single(result.Metadata);
+        Assert.Equal("finance", result.Metadata["department"]);
+        Assert.False(result.Metadata.ContainsKey("environment"));
+    }
+
+    [Fact]
+    public void Upsert_ShouldClearMetadataWhenOmitted()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            metadata: new Dictionary<string, string>
+            {
+                ["department"] = "engineering"
+            });
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Sara",
+            now.AddMinutes(1));
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Sara", result.Value);
+        Assert.Empty(result.Metadata);
+    }
+
+    [Fact]
+    public void SaveAndGet_ShouldProtectStoredMetadata()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        var original = new KeyValueEntry(
+            "name",
+            "Ali",
+            now,
+            metadata: new Dictionary<string, string>
+            {
+                ["department"] = "engineering"
+            });
+
+        repository.Save("userA", original);
+
+        original.UpdateMetadata(new Dictionary<string, string>
+        {
+            ["department"] = "finance"
+        });
+
+        var retrieved = repository.Get("userA", "name");
+
+        Assert.NotNull(retrieved);
+        Assert.Equal(
+            "engineering",
+            retrieved.Metadata["department"]);
+
+        retrieved.UpdateMetadata(new Dictionary<string, string>
+        {
+            ["department"] = "sales"
+        });
+
+        var stored = repository.Get("userA", "name");
+
+        Assert.NotNull(stored);
+        Assert.Equal(
+            "engineering",
+            stored.Metadata["department"]);
+    }
+
+    [Fact]
+    public void Upsert_ShouldPreserveEntryWhenMetadataIsInvalid()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.AddMinutes(30);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            expiresAt,
+            new Dictionary<string, string>
+            {
+                ["department"] = "engineering"
+            });
+
+        var invalidMetadata = new Dictionary<string, string>
+        {
+            [""] = "invalid"
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            repository.Upsert(
+                "userA",
+                "name",
+                "Sara",
+                now.AddMinutes(1),
+                now.AddHours(1),
+                invalidMetadata));
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Ali", result.Value);
+        Assert.Equal(now, result.UpdatedAt);
+        Assert.Equal(expiresAt, result.ExpiresAt);
+        Assert.Equal(
+            "engineering",
+            result.Metadata["department"]);
+    }
 }

@@ -51,7 +51,8 @@ public sealed class InMemoryKeyValueEntryRepository
         string key,
         string value,
         DateTimeOffset now,
-        DateTimeOffset? expiresAt = null)
+        DateTimeOffset? expiresAt = null,
+        IReadOnlyDictionary<string, string>? metadata = null)
     {
         lock (_sync)
         {
@@ -64,8 +65,13 @@ public sealed class InMemoryKeyValueEntryRepository
                     ? entry.UpdatedAt
                     : now;
 
-                entry.UpdateValue(value, updateTime);
-                entry.UpdateExpiration(expiresAt);
+                var updatedEntry = Copy(entry);
+
+                updatedEntry.UpdateValue(value, updateTime);
+                updatedEntry.UpdateExpiration(expiresAt);
+                updatedEntry.UpdateMetadata(metadata);
+
+                _entries[address] = updatedEntry;
             }
             else
             {
@@ -73,7 +79,8 @@ public sealed class InMemoryKeyValueEntryRepository
                     key,
                     value,
                     now,
-                    expiresAt);
+                    expiresAt,
+                    metadata);
             }
         }
     }
@@ -84,7 +91,8 @@ public sealed class InMemoryKeyValueEntryRepository
             source.Key,
             source.Value,
             source.CreatedAt,
-            source.ExpiresAt);
+            source.ExpiresAt,
+            source.Metadata);
 
         if (source.UpdatedAt != source.CreatedAt)
             copy.UpdateValue(source.Value, source.UpdatedAt);

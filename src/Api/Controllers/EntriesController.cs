@@ -39,7 +39,8 @@ public sealed class EntriesController : ControllerBase
                 key,
                 request.Value,
                 DateTimeOffset.UtcNow,
-                request.TtlSeconds);
+                request.TtlSeconds,
+                request.Metadata);
 
             return NoContent();
         }
@@ -64,7 +65,8 @@ public sealed class EntriesController : ControllerBase
                 entry.Value,
                 entry.CreatedAt,
                 entry.UpdatedAt,
-                entry.ExpiresAt));
+                entry.ExpiresAt,
+                entry.Metadata));
         }
         catch (ArgumentException ex)
         {
