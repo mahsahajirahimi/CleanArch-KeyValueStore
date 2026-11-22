@@ -9,4 +9,10 @@ public interface IKeyValueEntryRepository
     void Save(string keyspace, KeyValueEntry entry);
 
     bool Delete(string keyspace, string key);
+
+    void Upsert(
+        string keyspace,
+        string key,
+        string value,
+        DateTimeOffset now);
 }

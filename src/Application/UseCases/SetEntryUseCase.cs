@@ -1,5 +1,4 @@
 using KeyValueStore.Application.Abstractions;
-using KeyValueStore.Domain.Aggregates;
 
 namespace KeyValueStore.Application.UseCases;
 
@@ -23,17 +22,6 @@ public class SetEntryUseCase
                 "Keyspace cannot be empty.",
                 nameof(keyspace));
 
-        var entry = _repository.Get(keyspace, key);
-
-        if (entry is null)
-        {
-            entry = new KeyValueEntry(key, value, now);
-        }
-        else
-        {
-            entry.UpdateValue(value, now);
-        }
-
-        _repository.Save(keyspace, entry);
+        _repository.Upsert(keyspace, key, value, now);
     }
 }

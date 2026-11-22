@@ -1,5 +1,6 @@
 using KeyValueStore.Domain.Aggregates;
 using KeyValueStore.Infrastructure.Storage.InMemory;
+using Xunit;
 
 namespace KeyValueStore.Infrastructure.Tests;
 
@@ -16,7 +17,10 @@ public class InMemoryKeyValueEntryRepositoryTests
 
         var result = repository.Get("userA", "name");
 
-        Assert.Same(entry, result);
+        Assert.NotNull(result);
+        Assert.Equal(entry.Key, result.Key);
+        Assert.Equal(entry.Value, result.Value);
+        Assert.NotSame(entry, result);
     }
 
     [Fact]
@@ -43,7 +47,9 @@ public class InMemoryKeyValueEntryRepositoryTests
 
         var result = repository.Get("userA", "name");
 
-        Assert.Same(second, result);
+        Assert.NotNull(result);
+        Assert.Equal("Sara", result.Value);
+        Assert.NotSame(second, result);
     }
 
     [Fact]
@@ -58,8 +64,14 @@ public class InMemoryKeyValueEntryRepositoryTests
         repository.Save("userA", first);
         repository.Save("userB", second);
 
-        Assert.Same(first, repository.Get("userA", "name"));
-        Assert.Same(second, repository.Get("userB", "name"));
+        var resultA = repository.Get("userA", "name");
+        var resultB = repository.Get("userB", "name");
+
+        Assert.NotNull(resultA);
+        Assert.NotNull(resultB);
+
+        Assert.Equal("Ali", resultA.Value);
+        Assert.Equal("Sara", resultB.Value);
     }
 
     [Fact]
@@ -67,7 +79,9 @@ public class InMemoryKeyValueEntryRepositoryTests
     {
         var repository = new InMemoryKeyValueEntryRepository();
         var entry = new KeyValueEntry(
-            "name", "Ali", DateTimeOffset.UnixEpoch);
+            "name",
+            "Ali",
+            DateTimeOffset.UnixEpoch);
 
         repository.Save("userA", entry);
 
@@ -93,7 +107,9 @@ public class InMemoryKeyValueEntryRepositoryTests
 
         repository.Save("userA", entry);
 
-        Assert.Null(repository.Get("userA", "name"));
+        var result = repository.Get("userA", "name");
+
+        Assert.Null(result);
 
         Assert.False(repository.Delete("userA", "name"));
     }
@@ -112,6 +128,85 @@ public class InMemoryKeyValueEntryRepositoryTests
 
         repository.Save("userA", entry);
 
-        Assert.Same(entry, repository.Get("userA", "name"));
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Ali", result.Value);
+        Assert.NotSame(entry, result);
+    }
+
+    [Fact]
+    public void Upsert_ShouldHandleConcurrentWrites()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        Parallel.For(0, 500, i =>
+        {
+            repository.Upsert(
+                "userA",
+                $"key-{i}",
+                i.ToString(),
+                now);
+        });
+
+        for (int i = 0; i < 500; i++)
+        {
+            var entry = repository.Get("userA", $"key-{i}");
+
+            Assert.NotNull(entry);
+            Assert.Equal(i.ToString(), entry.Value);
+        }
+    }
+
+    [Fact]
+    public void Get_ShouldReturnIndependentCopy()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        var original = new KeyValueEntry("name", "Ali", now);
+
+        repository.Save("userA", original);
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+
+        result.UpdateValue("Sara", now.AddMinutes(1));
+
+        var stored = repository.Get("userA", "name");
+
+        Assert.NotNull(stored);
+        Assert.Equal("Ali", stored.Value);
+        Assert.NotSame(result, stored);
+    }
+
+    [Fact]
+    public void Upsert_ShouldKeepTimestampMonotonic()
+    {
+        var repository = new InMemoryKeyValueEntryRepository();
+        var now = DateTimeOffset.UnixEpoch;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Initial",
+            now);
+
+        Parallel.For(0, 500, i =>
+        {
+            repository.Upsert(
+                "userA",
+                "name",
+                i.ToString(),
+                now.AddTicks(i + 1));
+        });
+
+        var result = repository.Get("userA", "name");
+
+        Assert.NotNull(result);
+        Assert.Equal(now, result.CreatedAt);
+        Assert.Equal(now.AddTicks(500), result.UpdatedAt);
     }
 }
