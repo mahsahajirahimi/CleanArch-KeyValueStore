@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Application\KeyValueStore.Application.csproj" />
     <ProjectReference Include="..\Domain\KeyValueStore.Domain.csproj" />
+    <InternalsVisibleTo Include="KeyValueStore.Infrastructure.Tests" />
   </ItemGroup>
 
   <PropertyGroup>
