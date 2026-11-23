@@ -3,6 +3,7 @@ using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Application.UseCases;
 using KeyValueStore.Infrastructure.Storage.InMemory;
 using KeyValueStore.Infrastructure.Storage.Persistent;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KeyValueStore.Api.Extensions;
 
@@ -12,32 +13,28 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         StorageOptions options)
     {
-        switch (options.Mode)
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(options);
+
+        switch (options.Mode.Trim().ToLowerInvariant())
         {
-            case "InMemory":
-            {
+            case "inmemory":
                 services.AddSingleton<
                     IKeyValueEntryRepository,
                     InMemoryKeyValueEntryRepository>();
-
                 break;
-            }
 
-            case "Persistent":
-            {
-                string filePath = options.FilePath
-                    ?? throw new InvalidOperationException(
-                        "File path is required for Persistent mode.");
-
+            case "persistent":
                 services.AddSingleton<IKeyValueEntryRepository>(
-                    _ => new PersistentKeyValueEntryRepository(filePath));
-
+                    _ => new LogStructuredKeyValueEntryRepository(
+                        options.FilePath
+                            ?? throw new InvalidOperationException(
+                                "Persistent storage requires a file path.")));
                 break;
-            }
 
             default:
                 throw new InvalidOperationException(
-                    $"Unsupported storage mode: {options.Mode}");
+                    $"Unsupported storage mode: '{options.Mode}'.");
         }
 
         services.AddTransient<SetEntryUseCase>();
