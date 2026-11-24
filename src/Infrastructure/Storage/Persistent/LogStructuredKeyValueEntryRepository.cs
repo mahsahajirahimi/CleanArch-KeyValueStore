@@ -1,5 +1,6 @@
 using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Domain.Aggregates;
+using KeyValueStore.Infrastructure.Storage.Caching;
 
 namespace KeyValueStore.Infrastructure.Storage.Persistent;
 
@@ -10,8 +11,18 @@ public sealed class LogStructuredKeyValueEntryRepository
     private readonly AppendOnlyFileStore _log;
     private readonly BPlusTree _index = new();
 
-    public LogStructuredKeyValueEntryRepository(string filePath)
+    private readonly LruCache<
+        (string Keyspace, string Key),
+        KeyValueEntry> _cache;
+
+    public LogStructuredKeyValueEntryRepository(
+        string filePath,
+        int cacheCapacity = 100)
     {
+        _cache = new LruCache<
+            (string Keyspace, string Key),
+            KeyValueEntry>(cacheCapacity);
+
         _log = new AppendOnlyFileStore(filePath);
 
         _log.RecoverIncompleteTail();
@@ -32,10 +43,16 @@ public sealed class LogStructuredKeyValueEntryRepository
                     StoredEntry stored = RequireStoredEntry(record);
 
                     if (stored.ExpiresAt <= DateTimeOffset.UtcNow)
+                    {
                         _index.Delete(record.Keyspace, record.Key);
+                    }
                     else
+                    {
                         _index.Upsert(
-                            record.Keyspace, record.Key, offset);
+                            record.Keyspace,
+                            record.Key,
+                            offset);
+                    }
 
                     break;
                 }
@@ -58,7 +75,9 @@ public sealed class LogStructuredKeyValueEntryRepository
         lock (_sync)
         {
             return LoadActiveEntry(
-                keyspace, key, DateTimeOffset.UtcNow);
+                keyspace,
+                key,
+                DateTimeOffset.UtcNow);
         }
     }
 
@@ -89,6 +108,7 @@ public sealed class LogStructuredKeyValueEntryRepository
                 null));
 
             _index.Delete(keyspace, key);
+            _cache.Remove((keyspace, key));
 
             return true;
         }
@@ -111,7 +131,11 @@ public sealed class LogStructuredKeyValueEntryRepository
             if (entry is null)
             {
                 entry = new KeyValueEntry(
-                    key, value, now, expiresAt, metadata);
+                    key,
+                    value,
+                    now,
+                    expiresAt,
+                    metadata);
             }
             else
             {
@@ -133,6 +157,21 @@ public sealed class LogStructuredKeyValueEntryRepository
         string key,
         DateTimeOffset now)
     {
+        var cacheKey = (Keyspace: keyspace, Key: key);
+
+        if (_cache.TryGet(cacheKey, out var cachedEntry))
+        {
+            if (cachedEntry.IsExpired(now))
+            {
+                _cache.Remove(cacheKey);
+                _index.Delete(keyspace, key);
+
+                return null;
+            }
+
+            return CloneEntry(cachedEntry);
+        }
+
         long? offset = _index.FindOffset(keyspace, key);
 
         if (offset is null)
@@ -153,8 +192,12 @@ public sealed class LogStructuredKeyValueEntryRepository
         if (entry.IsExpired(now))
         {
             _index.Delete(keyspace, key);
+            _cache.Remove(cacheKey);
+
             return null;
         }
+
+        _cache.Put(cacheKey, CloneEntry(entry));
 
         return entry;
     }
@@ -176,10 +219,39 @@ public sealed class LogStructuredKeyValueEntryRepository
             entry.Key,
             stored));
 
+        var cacheKey = (
+            Keyspace: keyspace,
+            Key: entry.Key);
+
         if (entry.IsExpired(DateTimeOffset.UtcNow))
+        {
             _index.Delete(keyspace, entry.Key);
+            _cache.Remove(cacheKey);
+        }
         else
+        {
             _index.Upsert(keyspace, entry.Key, offset);
+            _cache.Put(cacheKey, CloneEntry(entry));
+        }
+    }
+
+    private static KeyValueEntry CloneEntry(KeyValueEntry source)
+    {
+        var copy = new KeyValueEntry(
+            source.Key,
+            source.Value,
+            source.CreatedAt,
+            source.ExpiresAt,
+            source.Metadata);
+
+        if (source.UpdatedAt != source.CreatedAt)
+        {
+            copy.UpdateValue(
+                source.Value,
+                source.UpdatedAt);
+        }
+
+        return copy;
     }
 
     private static StoredEntry RequireStoredEntry(LogRecord record)
@@ -205,19 +277,31 @@ public sealed class LogStructuredKeyValueEntryRepository
             stored.Metadata);
 
         if (stored.UpdatedAt != stored.CreatedAt)
-            entry.UpdateValue(stored.Value, stored.UpdatedAt);
+        {
+            entry.UpdateValue(
+                stored.Value,
+                stored.UpdatedAt);
+        }
 
         return entry;
     }
 
-    private static void ValidateAddress(string keyspace, string key)
+    private static void ValidateAddress(
+        string keyspace,
+        string key)
     {
         if (string.IsNullOrWhiteSpace(keyspace))
+        {
             throw new ArgumentException(
-                "Keyspace cannot be empty.", nameof(keyspace));
+                "Keyspace cannot be empty.",
+                nameof(keyspace));
+        }
 
         if (string.IsNullOrWhiteSpace(key))
+        {
             throw new ArgumentException(
-                "Key cannot be empty.", nameof(key));
+                "Key cannot be empty.",
+                nameof(key));
+        }
     }
 }

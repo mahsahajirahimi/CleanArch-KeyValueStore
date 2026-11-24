@@ -29,7 +29,8 @@ public static class ServiceCollectionExtensions
                     _ => new LogStructuredKeyValueEntryRepository(
                         options.FilePath
                             ?? throw new InvalidOperationException(
-                                "Persistent storage requires a file path.")));
+                                "Persistent storage requires a file path."),
+                        options.CacheCapacity));
                 break;
 
             default:

@@ -270,4 +270,145 @@ public sealed class LogStructuredKeyValueEntryRepositoryTests : IDisposable
         if (Directory.Exists(_testDirectory))
             Directory.Delete(_testDirectory, recursive: true);
     }
+
+    [Fact]
+    public void Constructor_ShouldRejectInvalidCacheCapacity()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new LogStructuredKeyValueEntryRepository(
+                StorePath, cacheCapacity: 0));
+    }
+
+    [Fact]
+    public void Upsert_ShouldRefreshCachedValue()
+    {
+        var repository =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        var now = DateTimeOffset.UtcNow;
+
+        repository.Upsert(
+            "userA", "name", "Ali", now);
+
+        Assert.Equal(
+            "Ali",
+            repository.Get("userA", "name")?.Value);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Sara",
+            now.AddSeconds(1));
+
+        Assert.Equal(
+            "Sara",
+            repository.Get("userA", "name")?.Value);
+
+        var restarted =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        Assert.Equal(
+            "Sara",
+            restarted.Get("userA", "name")?.Value);
+    }
+
+    [Fact]
+    public void Delete_ShouldInvalidateCachedEntry()
+    {
+        var repository =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            DateTimeOffset.UtcNow);
+
+        Assert.NotNull(repository.Get("userA", "name"));
+
+        Assert.True(repository.Delete("userA", "name"));
+
+        Assert.Null(repository.Get("userA", "name"));
+    }
+
+    [Fact]
+    public void Get_ShouldReturnDefensiveCopy()
+    {
+        var repository =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        var now = DateTimeOffset.UtcNow;
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now,
+            metadata: new Dictionary<string, string>
+            {
+                ["department"] = "engineering"
+            });
+
+        var first = repository.Get("userA", "name");
+
+        Assert.NotNull(first);
+
+        first.UpdateValue("Tampered", now.AddSeconds(1));
+
+        first.UpdateMetadata(new Dictionary<string, string>
+        {
+            ["department"] = "changed"
+        });
+
+        var second = repository.Get("userA", "name");
+
+        Assert.NotNull(second);
+        Assert.Equal("Ali", second.Value);
+        Assert.Equal(now, second.UpdatedAt);
+        Assert.Equal(
+            "engineering",
+            second.Metadata["department"]);
+
+        var restarted =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        Assert.Equal(
+            "Ali",
+            restarted.Get("userA", "name")?.Value);
+    }
+
+    [Fact]
+    public void CacheEviction_ShouldNotDeletePersistentData()
+    {
+        var repository =
+            new LogStructuredKeyValueEntryRepository(
+                StorePath,
+                cacheCapacity: 1);
+
+        var now = DateTimeOffset.UtcNow;
+
+        repository.Upsert("userA", "first", "A", now);
+        repository.Upsert("userA", "second", "B", now);
+
+        Assert.Equal(
+            "A",
+            repository.Get("userA", "first")?.Value);
+
+        Assert.Equal(
+            "B",
+            repository.Get("userA", "second")?.Value);
+
+        var restarted =
+            new LogStructuredKeyValueEntryRepository(
+                StorePath,
+                cacheCapacity: 1);
+
+        Assert.Equal(
+            "A",
+            restarted.Get("userA", "first")?.Value);
+
+        Assert.Equal(
+            "B",
+            restarted.Get("userA", "second")?.Value);
+    }
 }

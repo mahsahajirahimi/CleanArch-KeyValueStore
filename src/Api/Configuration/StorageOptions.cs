@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 
 namespace KeyValueStore.Api.Configuration;
 
@@ -5,34 +6,86 @@ public sealed class StorageOptions
 {
     public string Mode { get; }
     public string? FilePath { get; }
+    public int CacheCapacity { get; }
 
-    private StorageOptions(string mode, string? filePath)
+    private StorageOptions(
+        string mode,
+        string? filePath,
+        int cacheCapacity)
     {
         Mode = mode;
         FilePath = filePath;
+        CacheCapacity = cacheCapacity;
     }
 
     public static StorageOptions FromConfiguration(
         IConfiguration configuration,
         string contentRootPath)
     {
-        string mode = configuration["Storage:Mode"] ?? "InMemory";
+        ArgumentNullException.ThrowIfNull(configuration);
 
-        if (mode.Equals("InMemory", StringComparison.OrdinalIgnoreCase))
-            return new StorageOptions("InMemory", null);
+        if (string.IsNullOrWhiteSpace(contentRootPath))
+        {
+            throw new ArgumentException(
+                "Content root path cannot be empty.",
+                nameof(contentRootPath));
+        }
 
-        if (!mode.Equals("Persistent", StringComparison.OrdinalIgnoreCase))
+        string mode =
+            configuration["Storage:Mode"]?.Trim()
+            ?? "InMemory";
+
+        if (!mode.Equals(
+                "InMemory",
+                StringComparison.OrdinalIgnoreCase)
+            && !mode.Equals(
+                "Persistent",
+                StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidOperationException(
-                $"Unsupported storage mode: {mode}");
+                $"Unsupported storage mode: '{mode}'.");
+        }
 
-        string? filePath = configuration["Storage:FilePath"];
+        int cacheCapacity = 100;
 
-        if (string.IsNullOrWhiteSpace(filePath))
-            throw new InvalidOperationException(
-                "Storage:FilePath is required for Persistent mode.");
+        string? capacityValue =
+            configuration["Storage:CacheCapacity"];
 
-        string fullPath = Path.GetFullPath(filePath, contentRootPath);
+        if (capacityValue is not null)
+        {
+            if (!int.TryParse(
+                    capacityValue,
+                    out cacheCapacity)
+                || cacheCapacity <= 0)
+            {
+                throw new InvalidOperationException(
+                    "Storage:CacheCapacity must be a positive integer.");
+            }
+        }
 
-        return new StorageOptions("Persistent", fullPath);
+        string? filePath = null;
+
+        if (mode.Equals(
+            "Persistent",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            string? configuredPath =
+                configuration["Storage:FilePath"];
+
+            if (string.IsNullOrWhiteSpace(configuredPath))
+            {
+                throw new InvalidOperationException(
+                    "Persistent storage requires a file path.");
+            }
+
+            filePath = Path.GetFullPath(
+                configuredPath,
+                Path.GetFullPath(contentRootPath));
+        }
+
+        return new StorageOptions(
+            mode,
+            filePath,
+            cacheCapacity);
     }
 }
