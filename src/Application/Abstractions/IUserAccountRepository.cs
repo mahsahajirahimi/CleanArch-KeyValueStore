@@ -5,4 +5,6 @@ namespace KeyValueStore.Application.Abstractions;
 public interface IUserAccountRepository
 {
     UserAccount? GetById(Guid userId);
+
+    void Save(UserAccount user);
 }

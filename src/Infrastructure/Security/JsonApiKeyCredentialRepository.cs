@@ -1,132 +1,121 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Domain.Security;
 
 namespace KeyValueStore.Infrastructure.Security;
 
-public sealed class JsonApiKeyCredentialRepository
-    : IApiKeyCredentialRepository
+public sealed class JsonUserAccountRepository
+    : IUserAccountRepository
 {
     private readonly object _sync = new();
     private readonly string _filePath;
 
-    private Dictionary<Guid, ApiKeyCredential> _credentials;
+    private Dictionary<Guid, UserAccount> _users;
 
-    private sealed record StoredCredential(
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter<UserRole>() }
+    };
+
+    private sealed record StoredUser(
         Guid Id,
-        Guid UserId,
-        string SecretHash,
-        DateTimeOffset CreatedAt,
-        DateTimeOffset? RevokedAt);
+        string Keyspace,
+        UserRole Role,
+        bool IsActive);
 
-    public JsonApiKeyCredentialRepository(string filePath)
+    public JsonUserAccountRepository(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
             throw new ArgumentException(
-                "Credential file path cannot be empty.",
+                "User file path cannot be empty.",
                 nameof(filePath));
         }
 
         _filePath = Path.GetFullPath(filePath);
-        _credentials = LoadFromFile();
+        _users = LoadFromFile();
     }
 
-    public ApiKeyCredential? GetById(Guid keyId)
+    public UserAccount? GetById(Guid userId)
     {
         lock (_sync)
         {
-            return _credentials.TryGetValue(
-                keyId,
-                out var credential)
-                ? Clone(credential)
+            return _users.TryGetValue(userId, out var user)
+                ? Clone(user)
                 : null;
         }
     }
 
-    public IReadOnlyList<ApiKeyCredential> GetByUserId(
-        Guid userId)
+    public void Save(UserAccount user)
     {
-        lock (_sync)
-        {
-            return _credentials.Values
-                .Where(c => c.UserId == userId)
-                .OrderBy(c => c.CreatedAt)
-                .Select(Clone)
-                .ToList();
-        }
-    }
-
-    public void Save(ApiKeyCredential credential)
-    {
-        ArgumentNullException.ThrowIfNull(credential);
+        ArgumentNullException.ThrowIfNull(user);
 
         lock (_sync)
         {
-            var copy = Clone(credential);
+            var copy = Clone(user);
 
-            if (_credentials.TryGetValue(
+            if (_users.TryGetValue(
                 copy.Id,
                 out var existing))
             {
                 ValidateUpdate(existing, copy);
             }
 
-            var updated =
-                new Dictionary<Guid, ApiKeyCredential>(
-                    _credentials)
-                {
-                    [copy.Id] = copy
-                };
+            var updated = new Dictionary<Guid, UserAccount>(
+                _users)
+            {
+                [copy.Id] = copy
+            };
 
             WriteToFile(updated);
 
-            _credentials = updated;
+            _users = updated;
         }
     }
 
     private static void ValidateUpdate(
-        ApiKeyCredential existing,
-        ApiKeyCredential updated)
+        UserAccount existing,
+        UserAccount updated)
     {
-        if (existing.UserId != updated.UserId ||
-            existing.SecretHash != updated.SecretHash ||
-            existing.CreatedAt != updated.CreatedAt)
+        if (!string.Equals(
+                existing.Keyspace,
+                updated.Keyspace,
+                StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "Credential identity cannot be changed.");
+                "User keyspace cannot be changed.");
         }
 
-        if (existing.IsRevoked &&
-            existing.RevokedAt != updated.RevokedAt)
+        if (!existing.IsActive && updated.IsActive)
         {
             throw new InvalidOperationException(
-                "A revoked credential cannot be reactivated or modified.");
+                "A deactivated user cannot be reactivated.");
         }
     }
 
-    private Dictionary<Guid, ApiKeyCredential> LoadFromFile()
+    private Dictionary<Guid, UserAccount> LoadFromFile()
     {
-        var result =
-            new Dictionary<Guid, ApiKeyCredential>();
+        var result = new Dictionary<Guid, UserAccount>();
 
         if (!File.Exists(_filePath))
             return result;
 
-        List<StoredCredential> stored;
+        List<StoredUser> stored;
 
         try
         {
-            stored = JsonSerializer.Deserialize<
-                List<StoredCredential>>(
-                    File.ReadAllBytes(_filePath))
+            stored = JsonSerializer.Deserialize<List<StoredUser>>(
+                File.ReadAllBytes(_filePath),
+                JsonOptions)
                 ?? throw new InvalidDataException(
-                    "Credential file cannot be null.");
+                    "User file cannot be null.");
         }
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                "Credential file contains invalid JSON.",
+                "User file contains invalid JSON.",
                 ex);
         }
 
@@ -135,35 +124,32 @@ public sealed class JsonApiKeyCredentialRepository
             if (item is null)
             {
                 throw new InvalidDataException(
-                    "Credential file contains a null entry.");
+                    "User file contains a null entry.");
             }
 
-            ApiKeyCredential credential;
+            UserAccount user;
 
             try
             {
-                credential = new ApiKeyCredential(
+                user = new UserAccount(
                     item.Id,
-                    item.UserId,
-                    item.SecretHash,
-                    item.CreatedAt);
+                    item.Keyspace,
+                    item.Role);
 
-                if (item.RevokedAt is not null)
-                {
-                    credential.Revoke(item.RevokedAt.Value);
-                }
+                if (!item.IsActive)
+                    user.Deactivate();
             }
             catch (ArgumentException ex)
             {
                 throw new InvalidDataException(
-                    "Credential file contains invalid data.",
+                    "User file contains invalid data.",
                     ex);
             }
 
-            if (!result.TryAdd(credential.Id, credential))
+            if (!result.TryAdd(user.Id, user))
             {
                 throw new InvalidDataException(
-                    "Credential file contains duplicate IDs.");
+                    "User file contains duplicate IDs.");
             }
         }
 
@@ -171,22 +157,21 @@ public sealed class JsonApiKeyCredentialRepository
     }
 
     private void WriteToFile(
-        Dictionary<Guid, ApiKeyCredential> credentials)
+        Dictionary<Guid, UserAccount> users)
     {
         string directory = Path.GetDirectoryName(_filePath)
             ?? throw new InvalidOperationException(
-                "Invalid credential file path.");
+                "Invalid user file path.");
 
         Directory.CreateDirectory(directory);
 
-        var stored = credentials.Values
-            .OrderBy(c => c.Id)
-            .Select(c => new StoredCredential(
-                c.Id,
-                c.UserId,
-                c.SecretHash,
-                c.CreatedAt,
-                c.RevokedAt))
+        var stored = users.Values
+            .OrderBy(user => user.Id)
+            .Select(user => new StoredUser(
+                user.Id,
+                user.Keyspace,
+                user.Role,
+                user.IsActive))
             .ToArray();
 
         string temporaryPath =
@@ -203,10 +188,7 @@ public sealed class JsonApiKeyCredentialRepository
                 JsonSerializer.Serialize(
                     stream,
                     stored,
-                    new JsonSerializerOptions
-                    {
-                        WriteIndented = true
-                    });
+                    JsonOptions);
 
                 stream.Flush(flushToDisk: true);
             }
@@ -223,17 +205,15 @@ public sealed class JsonApiKeyCredentialRepository
         }
     }
 
-    private static ApiKeyCredential Clone(
-        ApiKeyCredential original)
+    private static UserAccount Clone(UserAccount original)
     {
-        var copy = new ApiKeyCredential(
+        var copy = new UserAccount(
             original.Id,
-            original.UserId,
-            original.SecretHash,
-            original.CreatedAt);
+            original.Keyspace,
+            original.Role);
 
-        if (original.RevokedAt is not null)
-            copy.Revoke(original.RevokedAt.Value);
+        if (!original.IsActive)
+            copy.Deactivate();
 
         return copy;
     }

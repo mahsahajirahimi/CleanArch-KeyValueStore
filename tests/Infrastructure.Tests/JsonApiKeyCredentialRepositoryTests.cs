@@ -1,211 +1,221 @@
+using System.Text.Json;
 using KeyValueStore.Domain.Security;
 using KeyValueStore.Infrastructure.Security;
 using Xunit;
 
 namespace KeyValueStore.Infrastructure.Tests;
 
-public sealed class JsonApiKeyCredentialRepositoryTests
+public sealed class JsonUserAccountRepositoryTests
     : IDisposable
 {
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
-        $"KeyValueStoreCredentialTests-{Guid.NewGuid():N}");
+        $"KeyValueStoreUserTests-{Guid.NewGuid():N}");
 
     private string StorePath =>
-        Path.Combine(_directory, "credentials.json");
-
-    private readonly ApiKeyTokenService _tokenService = new();
+        Path.Combine(_directory, "users.json");
 
     [Fact]
-    public void Save_ShouldRestoreCredentialAfterRestart()
+    public void GetById_ShouldReturnNullForUnknownUser()
     {
-        var userId = Guid.NewGuid();
-        var issued = _tokenService.Issue(
-            userId,
-            DateTimeOffset.UtcNow);
-
         var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        repository.Save(issued.Credential);
-
-        var restarted =
-            new JsonApiKeyCredentialRepository(StorePath);
-
-        var restored = restarted.GetById(
-            issued.Credential.Id);
-
-        Assert.NotNull(restored);
-        Assert.Equal(userId, restored.UserId);
-
-        Assert.True(_tokenService.Verify(
-            restored,
-            issued.PlaintextKey));
+        Assert.Null(repository.GetById(Guid.NewGuid()));
     }
 
     [Fact]
-    public void Save_ShouldPersistRevocationAfterRestart()
+    public void Save_ShouldRestoreUsersAfterRestart()
     {
-        var now = DateTimeOffset.UtcNow;
-
-        var issued = _tokenService.Issue(
-            Guid.NewGuid(),
-            now);
-
         var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        repository.Save(issued.Credential);
+        var admin = CreateUser("userA", UserRole.Admin);
+        var reader = CreateUser("userB", UserRole.Reader);
 
-        var credential = repository.GetById(
-            issued.Credential.Id);
-
-        Assert.NotNull(credential);
-
-        credential.Revoke(now.AddMinutes(1));
-        repository.Save(credential);
+        repository.Save(admin);
+        repository.Save(reader);
 
         var restarted =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        var restored = restarted.GetById(
-            issued.Credential.Id);
+        var restoredAdmin = restarted.GetById(admin.Id);
+        var restoredReader = restarted.GetById(reader.Id);
 
-        Assert.NotNull(restored);
-        Assert.True(restored.IsRevoked);
+        Assert.NotNull(restoredAdmin);
+        Assert.Equal(UserRole.Admin, restoredAdmin.Role);
+        Assert.Equal("userA", restoredAdmin.Keyspace);
 
-        Assert.False(_tokenService.Verify(
-            restored,
-            issued.PlaintextKey));
+        Assert.NotNull(restoredReader);
+        Assert.Equal(UserRole.Reader, restoredReader.Role);
+        Assert.Equal("userB", restoredReader.Keyspace);
     }
 
     [Fact]
-    public void GetByUserId_ShouldReturnOnlyUsersCredentials()
+    public void Save_ShouldPersistRoleChanges()
     {
         var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        var userA = Guid.NewGuid();
-        var userB = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
+        var user = CreateUser("userA", UserRole.Reader);
 
-        var first = _tokenService.Issue(userA, now);
-        var second = _tokenService.Issue(userA, now);
-        var third = _tokenService.Issue(userB, now);
+        repository.Save(user);
 
-        repository.Save(first.Credential);
-        repository.Save(second.Credential);
-        repository.Save(third.Credential);
+        user.ChangeRole(UserRole.Writer);
+        repository.Save(user);
 
         var restarted =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        var userAKeys = restarted.GetByUserId(userA);
+        Assert.Equal(
+            UserRole.Writer,
+            restarted.GetById(user.Id)?.Role);
+    }
 
-        Assert.Equal(2, userAKeys.Count);
-        Assert.All(
-            userAKeys,
-            credential => Assert.Equal(
-                userA,
-                credential.UserId));
+    [Fact]
+    public void Save_ShouldPersistDeactivation()
+    {
+        var repository =
+            new JsonUserAccountRepository(StorePath);
+
+        var user = CreateUser("userA", UserRole.Admin);
+
+        repository.Save(user);
+
+        user.Deactivate();
+        repository.Save(user);
+
+        var restarted =
+            new JsonUserAccountRepository(StorePath);
+
+        Assert.False(restarted.GetById(user.Id)?.IsActive);
     }
 
     [Fact]
     public void GetById_ShouldReturnDefensiveCopy()
     {
-        var now = DateTimeOffset.UtcNow;
-
-        var issued = _tokenService.Issue(
-            Guid.NewGuid(),
-            now);
-
         var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        repository.Save(issued.Credential);
+        var user = CreateUser("userA", UserRole.Reader);
 
-        var first = repository.GetById(
-            issued.Credential.Id);
+        repository.Save(user);
 
-        Assert.NotNull(first);
+        var fetched = repository.GetById(user.Id);
 
-        first.Revoke(now.AddMinutes(1));
+        Assert.NotNull(fetched);
 
-        var second = repository.GetById(
-            issued.Credential.Id);
+        fetched.ChangeRole(UserRole.Admin);
 
-        Assert.NotNull(second);
-        Assert.False(second.IsRevoked);
+        var stored = repository.GetById(user.Id);
+
+        Assert.NotNull(stored);
+        Assert.Equal(UserRole.Reader, stored.Role);
+    }
+
+    [Fact]
+    public void Save_ShouldRejectKeyspaceChange()
+    {
+        var repository =
+            new JsonUserAccountRepository(StorePath);
+
+        var user = CreateUser("userA", UserRole.Reader);
+        repository.Save(user);
+
+        var modified = new UserAccount(
+            user.Id,
+            "userB",
+            UserRole.Reader);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            repository.Save(modified));
+
+        Assert.Equal(
+            "userA",
+            repository.GetById(user.Id)?.Keyspace);
     }
 
     [Fact]
     public void Save_ShouldRejectReactivation()
     {
-        var now = DateTimeOffset.UtcNow;
-
-        var issued = _tokenService.Issue(
-            Guid.NewGuid(),
-            now);
-
         var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
+            new JsonUserAccountRepository(StorePath);
 
-        issued.Credential.Revoke(now.AddMinutes(1));
-        repository.Save(issued.Credential);
+        var user = CreateUser("userA", UserRole.Writer);
 
-        var oldActiveVersion = new ApiKeyCredential(
-            issued.Credential.Id,
-            issued.Credential.UserId,
-            issued.Credential.SecretHash,
-            issued.Credential.CreatedAt);
+        user.Deactivate();
+        repository.Save(user);
+
+        var activeCopy = new UserAccount(
+            user.Id,
+            user.Keyspace,
+            user.Role);
 
         Assert.Throws<InvalidOperationException>(() =>
-            repository.Save(oldActiveVersion));
+            repository.Save(activeCopy));
 
-        Assert.True(repository.GetById(
-            issued.Credential.Id)!.IsRevoked);
+        Assert.False(repository.GetById(user.Id)?.IsActive);
     }
 
     [Fact]
-    public void Save_ShouldNotPersistPlaintextKey()
-    {
-        var issued = _tokenService.Issue(
-            Guid.NewGuid(),
-            DateTimeOffset.UtcNow);
-
-        var repository =
-            new JsonApiKeyCredentialRepository(StorePath);
-
-        repository.Save(issued.Credential);
-
-        string fileContent = File.ReadAllText(StorePath);
-
-        Assert.DoesNotContain(
-            issued.PlaintextKey,
-            fileContent);
-
-        Assert.Contains(
-            issued.Credential.SecretHash,
-            fileContent);
-    }
-
-    [Fact]
-    public void Startup_ShouldRejectCorruptedCredentialFile()
+    public void Startup_ShouldRejectCorruptedUserFile()
     {
         Directory.CreateDirectory(_directory);
 
-        File.WriteAllText(
-            StorePath,
-            "{invalid json");
+        File.WriteAllText(StorePath, "{invalid json");
 
-        string original = File.ReadAllText(StorePath);
+        string originalContent =
+            File.ReadAllText(StorePath);
 
         Assert.Throws<InvalidDataException>(() =>
-            new JsonApiKeyCredentialRepository(StorePath));
+            new JsonUserAccountRepository(StorePath));
 
         Assert.Equal(
-            original,
+            originalContent,
             File.ReadAllText(StorePath));
+    }
+
+    [Fact]
+    public void Startup_ShouldRejectDuplicateUserIds()
+    {
+        Directory.CreateDirectory(_directory);
+
+        Guid id = Guid.NewGuid();
+
+        var duplicates = new[]
+        {
+            new
+            {
+                Id = id,
+                Keyspace = "userA",
+                Role = 0,
+                IsActive = true
+            },
+            new
+            {
+                Id = id,
+                Keyspace = "userA",
+                Role = 1,
+                IsActive = true
+            }
+        };
+
+        File.WriteAllText(
+            StorePath,
+            JsonSerializer.Serialize(duplicates));
+
+        Assert.Throws<InvalidDataException>(() =>
+            new JsonUserAccountRepository(StorePath));
+    }
+
+    private static UserAccount CreateUser(
+        string keyspace,
+        UserRole role)
+    {
+        return new UserAccount(
+            Guid.NewGuid(),
+            keyspace,
+            role);
     }
 
     public void Dispose()

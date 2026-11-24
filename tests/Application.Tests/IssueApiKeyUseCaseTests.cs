@@ -228,6 +228,11 @@ public sealed class IssueApiKeyUseCaseTests
         {
             return _users.GetValueOrDefault(userId);
         }
+
+        public void Save(UserAccount user)
+        {
+            _users[user.Id] = user;
+        }
     }
 
     private sealed class FakeCredentialRepository
