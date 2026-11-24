@@ -1,10 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using KeyValueStore.Domain.Security;
+using KeyValueStore.Application.Abstractions;
 
 namespace KeyValueStore.Infrastructure.Security;
 
-public sealed class ApiKeyTokenService
+public sealed class ApiKeyTokenService : IApiKeyTokenService
 {
     private const string Prefix = "kvs_";
     private const int SecretBytes = 32;
