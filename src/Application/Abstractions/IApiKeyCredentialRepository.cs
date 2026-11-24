@@ -9,4 +9,9 @@ public interface IApiKeyCredentialRepository
     IReadOnlyList<ApiKeyCredential> GetByUserId(Guid userId);
 
     void Save(ApiKeyCredential credential);
+
+    void Rotate(
+        Guid oldKeyId,
+        ApiKeyCredential replacement,
+        DateTimeOffset now);
 }

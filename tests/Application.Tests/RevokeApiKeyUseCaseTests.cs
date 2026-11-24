@@ -308,5 +308,14 @@ public sealed class RevokeApiKeyUseCaseTests
 
             return copy;
         }
+
+        public void Rotate(
+            Guid oldKeyId,
+            ApiKeyCredential replacement,
+            DateTimeOffset now)
+        {
+            throw new NotSupportedException(
+                "Rotation is not used by this test.");
+        }
     }
 }

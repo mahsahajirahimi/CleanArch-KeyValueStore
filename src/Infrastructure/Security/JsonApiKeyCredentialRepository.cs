@@ -1,121 +1,208 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Domain.Security;
 
 namespace KeyValueStore.Infrastructure.Security;
 
-public sealed class JsonUserAccountRepository
-    : IUserAccountRepository
+public sealed class JsonApiKeyCredentialRepository
+    : IApiKeyCredentialRepository
 {
     private readonly object _sync = new();
     private readonly string _filePath;
 
-    private Dictionary<Guid, UserAccount> _users;
+    private Dictionary<Guid, ApiKeyCredential> _credentials;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter<UserRole>() }
-    };
-
-    private sealed record StoredUser(
+    private sealed record StoredCredential(
         Guid Id,
-        string Keyspace,
-        UserRole Role,
-        bool IsActive);
+        Guid UserId,
+        string SecretHash,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? RevokedAt);
 
-    public JsonUserAccountRepository(string filePath)
+    public JsonApiKeyCredentialRepository(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
             throw new ArgumentException(
-                "User file path cannot be empty.",
+                "Credential file path cannot be empty.",
                 nameof(filePath));
         }
 
         _filePath = Path.GetFullPath(filePath);
-        _users = LoadFromFile();
+        _credentials = LoadFromFile();
     }
 
-    public UserAccount? GetById(Guid userId)
+    public ApiKeyCredential? GetById(Guid keyId)
     {
         lock (_sync)
         {
-            return _users.TryGetValue(userId, out var user)
-                ? Clone(user)
+            return _credentials.TryGetValue(
+                keyId,
+                out var credential)
+                ? Clone(credential)
                 : null;
         }
     }
 
-    public void Save(UserAccount user)
+    public IReadOnlyList<ApiKeyCredential> GetByUserId(
+        Guid userId)
     {
-        ArgumentNullException.ThrowIfNull(user);
+        lock (_sync)
+        {
+            return _credentials.Values
+                .Where(c => c.UserId == userId)
+                .OrderBy(c => c.CreatedAt)
+                .Select(Clone)
+                .ToList();
+        }
+    }
+
+    public void Save(ApiKeyCredential credential)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
 
         lock (_sync)
         {
-            var copy = Clone(user);
+            var copy = Clone(credential);
 
-            if (_users.TryGetValue(
+            if (_credentials.TryGetValue(
                 copy.Id,
                 out var existing))
             {
                 ValidateUpdate(existing, copy);
             }
 
-            var updated = new Dictionary<Guid, UserAccount>(
-                _users)
-            {
-                [copy.Id] = copy
-            };
+            var updated =
+                new Dictionary<Guid, ApiKeyCredential>(
+                    _credentials)
+                {
+                    [copy.Id] = copy
+                };
 
             WriteToFile(updated);
 
-            _users = updated;
+            _credentials = updated;
+        }
+    }
+
+    public void Rotate(
+        Guid oldKeyId,
+        ApiKeyCredential replacement,
+        DateTimeOffset now)
+    {
+        if (oldKeyId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Old API key ID cannot be empty.",
+                nameof(oldKeyId));
+        }
+
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        lock (_sync)
+        {
+            if (!_credentials.TryGetValue(
+                oldKeyId,
+                out var oldCredential))
+            {
+                throw new InvalidOperationException(
+                    "Original API key does not exist.");
+            }
+
+            if (oldCredential.IsRevoked)
+            {
+                throw new InvalidOperationException(
+                    "Original API key is already revoked.");
+            }
+
+            if (replacement.Id == oldKeyId ||
+                _credentials.ContainsKey(replacement.Id))
+            {
+                throw new InvalidOperationException(
+                    "Replacement API key ID already exists.");
+            }
+
+            if (replacement.UserId != oldCredential.UserId)
+            {
+                throw new InvalidOperationException(
+                    "Replacement must belong to the same user.");
+            }
+
+            if (replacement.IsRevoked)
+            {
+                throw new InvalidOperationException(
+                    "Replacement API key must be active.");
+            }
+
+            if (now < oldCredential.CreatedAt ||
+                replacement.CreatedAt != now)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(now),
+                    "Invalid rotation timestamp.");
+            }
+
+            var revokedOld = Clone(oldCredential);
+            revokedOld.Revoke(now);
+
+            var newCredential = Clone(replacement);
+
+            var updated =
+                new Dictionary<Guid, ApiKeyCredential>(
+                    _credentials)
+                {
+                    [oldKeyId] = revokedOld,
+                    [newCredential.Id] = newCredential
+                };
+
+            WriteToFile(updated);
+
+            _credentials = updated;
         }
     }
 
     private static void ValidateUpdate(
-        UserAccount existing,
-        UserAccount updated)
+        ApiKeyCredential existing,
+        ApiKeyCredential updated)
     {
-        if (!string.Equals(
-                existing.Keyspace,
-                updated.Keyspace,
-                StringComparison.Ordinal))
+        if (existing.UserId != updated.UserId ||
+            existing.SecretHash != updated.SecretHash ||
+            existing.CreatedAt != updated.CreatedAt)
         {
             throw new InvalidOperationException(
-                "User keyspace cannot be changed.");
+                "Credential identity cannot be changed.");
         }
 
-        if (!existing.IsActive && updated.IsActive)
+        if (existing.IsRevoked &&
+            existing.RevokedAt != updated.RevokedAt)
         {
             throw new InvalidOperationException(
-                "A deactivated user cannot be reactivated.");
+                "A revoked credential cannot be reactivated or modified.");
         }
     }
 
-    private Dictionary<Guid, UserAccount> LoadFromFile()
+    private Dictionary<Guid, ApiKeyCredential> LoadFromFile()
     {
-        var result = new Dictionary<Guid, UserAccount>();
+        var result =
+            new Dictionary<Guid, ApiKeyCredential>();
 
         if (!File.Exists(_filePath))
             return result;
 
-        List<StoredUser> stored;
+        List<StoredCredential> stored;
 
         try
         {
-            stored = JsonSerializer.Deserialize<List<StoredUser>>(
-                File.ReadAllBytes(_filePath),
-                JsonOptions)
+            stored = JsonSerializer.Deserialize<
+                List<StoredCredential>>(
+                    File.ReadAllBytes(_filePath))
                 ?? throw new InvalidDataException(
-                    "User file cannot be null.");
+                    "Credential file cannot be null.");
         }
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                "User file contains invalid JSON.",
+                "Credential file contains invalid JSON.",
                 ex);
         }
 
@@ -124,32 +211,35 @@ public sealed class JsonUserAccountRepository
             if (item is null)
             {
                 throw new InvalidDataException(
-                    "User file contains a null entry.");
+                    "Credential file contains a null entry.");
             }
 
-            UserAccount user;
+            ApiKeyCredential credential;
 
             try
             {
-                user = new UserAccount(
+                credential = new ApiKeyCredential(
                     item.Id,
-                    item.Keyspace,
-                    item.Role);
+                    item.UserId,
+                    item.SecretHash,
+                    item.CreatedAt);
 
-                if (!item.IsActive)
-                    user.Deactivate();
+                if (item.RevokedAt is not null)
+                {
+                    credential.Revoke(item.RevokedAt.Value);
+                }
             }
             catch (ArgumentException ex)
             {
                 throw new InvalidDataException(
-                    "User file contains invalid data.",
+                    "Credential file contains invalid data.",
                     ex);
             }
 
-            if (!result.TryAdd(user.Id, user))
+            if (!result.TryAdd(credential.Id, credential))
             {
                 throw new InvalidDataException(
-                    "User file contains duplicate IDs.");
+                    "Credential file contains duplicate IDs.");
             }
         }
 
@@ -157,21 +247,22 @@ public sealed class JsonUserAccountRepository
     }
 
     private void WriteToFile(
-        Dictionary<Guid, UserAccount> users)
+        Dictionary<Guid, ApiKeyCredential> credentials)
     {
         string directory = Path.GetDirectoryName(_filePath)
             ?? throw new InvalidOperationException(
-                "Invalid user file path.");
+                "Invalid credential file path.");
 
         Directory.CreateDirectory(directory);
 
-        var stored = users.Values
-            .OrderBy(user => user.Id)
-            .Select(user => new StoredUser(
-                user.Id,
-                user.Keyspace,
-                user.Role,
-                user.IsActive))
+        var stored = credentials.Values
+            .OrderBy(c => c.Id)
+            .Select(c => new StoredCredential(
+                c.Id,
+                c.UserId,
+                c.SecretHash,
+                c.CreatedAt,
+                c.RevokedAt))
             .ToArray();
 
         string temporaryPath =
@@ -188,7 +279,10 @@ public sealed class JsonUserAccountRepository
                 JsonSerializer.Serialize(
                     stream,
                     stored,
-                    JsonOptions);
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
 
                 stream.Flush(flushToDisk: true);
             }
@@ -205,15 +299,19 @@ public sealed class JsonUserAccountRepository
         }
     }
 
-    private static UserAccount Clone(UserAccount original)
+    private static ApiKeyCredential Clone(
+        ApiKeyCredential original)
     {
-        var copy = new UserAccount(
+        var copy = new ApiKeyCredential(
             original.Id,
-            original.Keyspace,
-            original.Role);
+            original.UserId,
+            original.SecretHash,
+            original.CreatedAt);
 
-        if (!original.IsActive)
-            copy.Deactivate();
+        if (original.RevokedAt is not null)
+        {
+            copy.Revoke(original.RevokedAt.Value);
+        }
 
         return copy;
     }
