@@ -132,4 +132,15 @@ public sealed class ApiKeyTokenService : IApiKeyTokenService
 
         return true;
     }
+
+    public bool TryGetKeyId(
+        string? presentedKey,
+        out Guid keyId)
+    {
+        return TryParse(
+            presentedKey,
+            out keyId,
+            out _);
+    }
+
 }

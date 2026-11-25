@@ -1,12 +1,15 @@
-
+using KeyValueStore.Api.Authentication;
 using KeyValueStore.Api.Contracts;
 using KeyValueStore.Application.UseCases;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace KeyValueStore.Api.Controllers;
 
 [ApiController]
 [Route("api/keyspaces/{keyspace}/entries")]
+[Authorize(
+    AuthenticationSchemes = ApiKeyAuthenticationHandler.SchemeName)]
 public sealed class EntriesController : ControllerBase
 {
     private readonly SetEntryUseCase _setEntry;
@@ -29,66 +32,57 @@ public sealed class EntriesController : ControllerBase
         string key,
         [FromBody] SetEntryRequest request)
     {
-        if (request.Value is null)
-            return BadRequest(new { error = "Value cannot be null." });
-
-        try
+        if (request is null ||
+            request.Value is null)
         {
-            _setEntry.Execute(
-                keyspace,
-                key,
-                request.Value,
-                DateTimeOffset.UtcNow,
-                request.TtlSeconds,
-                request.Metadata);
+            return BadRequest(
+                "A value is required.");
+        }
 
-            return NoContent();
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        _setEntry.Execute(
+            keyspace,
+            key,
+            request.Value,
+            DateTimeOffset.UtcNow);
+
+        return NoContent();
     }
 
     [HttpGet("{key}")]
-    public IActionResult Get(string keyspace, string key)
+    public IActionResult Get(
+        string keyspace,
+        string key)
     {
-        try
-        {
-            var entry = _getEntry.Execute(keyspace, key);
+        var entry = _getEntry.Execute(
+            keyspace,
+            key);
 
-            if (entry is null)
-                return NotFound();
+        if (entry is null)
+            return NotFound();
 
-            return Ok(new EntryResponse(
-                entry.Key,
-                entry.Value,
-                entry.CreatedAt,
-                entry.UpdatedAt,
-                entry.ExpiresAt,
-                entry.Metadata));
-        }
-        catch (ArgumentException ex)
+        return Ok(new
         {
-            return BadRequest(new { error = ex.Message });
-        }
+            entry.Key,
+            entry.Value,
+            entry.CreatedAt,
+            entry.UpdatedAt,
+            entry.ExpiresAt,
+            entry.Metadata
+        });
     }
 
     [HttpDelete("{key}")]
-    public IActionResult Delete(string keyspace, string key)
+    public IActionResult Delete(
+        string keyspace,
+        string key)
     {
-        try
-        {
-            bool deleted = _deleteEntry.Execute(keyspace, key);
+        bool deleted = _deleteEntry.Execute(
+            keyspace,
+            key);
 
-            if (!deleted)
-                return NotFound();
+        if (!deleted)
+            return NotFound();
 
-            return NoContent();
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        return NoContent();
     }
 }

@@ -12,9 +12,25 @@ var storageOptions = StorageOptions.FromConfiguration(
 
 builder.Services.AddKeyValueStoreServices(storageOptions);
 
+string securityDataDirectory =
+    Path.GetDirectoryName(storageOptions.FilePath)
+    ?? Path.Combine(
+        builder.Environment.ContentRootPath,
+        "data");
+
+builder.Services.AddApiKeyAuthentication(
+    securityDataDirectory);
+
 var app = builder.Build();
 
 app.Services.GetRequiredService<IKeyValueEntryRepository>();
+app.Services.GetRequiredService<IUserAccountRepository>();
+app.Services.GetRequiredService<IApiKeyCredentialRepository>();
+
+app.UseRouting();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 
