@@ -217,4 +217,12 @@ public sealed class JsonUserAccountRepository
 
         return copy;
     }
+
+    public bool HasAny()
+    {
+        lock (_sync)
+        {
+            return _users.Count > 0;
+        }
+    }
 }
