@@ -51,7 +51,9 @@ public sealed class EntriesController : ControllerBase
             keyspace,
             key,
             request.Value,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            request.TtlSeconds,
+            request.Metadata);
 
         return NoContent();
     }
