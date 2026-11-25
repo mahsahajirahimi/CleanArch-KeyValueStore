@@ -1,6 +1,7 @@
 using KeyValueStore.Api.Configuration;
 using KeyValueStore.Api.Extensions;
 using KeyValueStore.Application.Abstractions;
+using KeyValueStore.Application.UseCases;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +21,8 @@ string securityDataDirectory =
 
 builder.Services.AddApiKeyAuthentication(
     securityDataDirectory);
+
+builder.Services.AddTransient<AuthorizeEntryOperationUseCase>();
 
 var app = builder.Build();
 

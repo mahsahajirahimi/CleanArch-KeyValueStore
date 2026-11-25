@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using KeyValueStore.Api.Authentication;
 using KeyValueStore.Api.Contracts;
 using KeyValueStore.Application.UseCases;
+using KeyValueStore.Domain.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,15 +17,18 @@ public sealed class EntriesController : ControllerBase
     private readonly SetEntryUseCase _setEntry;
     private readonly GetEntryUseCase _getEntry;
     private readonly DeleteEntryUseCase _deleteEntry;
+    private readonly AuthorizeEntryOperationUseCase _authorizeEntry;
 
     public EntriesController(
         SetEntryUseCase setEntry,
         GetEntryUseCase getEntry,
-        DeleteEntryUseCase deleteEntry)
+        DeleteEntryUseCase deleteEntry,
+        AuthorizeEntryOperationUseCase authorizeEntry)
     {
         _setEntry = setEntry;
         _getEntry = getEntry;
         _deleteEntry = deleteEntry;
+        _authorizeEntry = authorizeEntry;
     }
 
     [HttpPut("{key}")]
@@ -32,12 +37,15 @@ public sealed class EntriesController : ControllerBase
         string key,
         [FromBody] SetEntryRequest request)
     {
-        if (request is null ||
-            request.Value is null)
-        {
-            return BadRequest(
-                "A value is required.");
-        }
+        IActionResult? denial = CheckAccess(
+            keyspace,
+            EntryOperation.Write);
+
+        if (denial is not null)
+            return denial;
+
+        if (request is null || request.Value is null)
+            return BadRequest("A value is required.");
 
         _setEntry.Execute(
             keyspace,
@@ -53,9 +61,14 @@ public sealed class EntriesController : ControllerBase
         string keyspace,
         string key)
     {
-        var entry = _getEntry.Execute(
+        IActionResult? denial = CheckAccess(
             keyspace,
-            key);
+            EntryOperation.Read);
+
+        if (denial is not null)
+            return denial;
+
+        var entry = _getEntry.Execute(keyspace, key);
 
         if (entry is null)
             return NotFound();
@@ -76,13 +89,43 @@ public sealed class EntriesController : ControllerBase
         string keyspace,
         string key)
     {
-        bool deleted = _deleteEntry.Execute(
+        IActionResult? denial = CheckAccess(
             keyspace,
-            key);
+            EntryOperation.Delete);
+
+        if (denial is not null)
+            return denial;
+
+        bool deleted = _deleteEntry.Execute(keyspace, key);
 
         if (!deleted)
             return NotFound();
 
         return NoContent();
+    }
+
+    private IActionResult? CheckAccess(
+        string keyspace,
+        EntryOperation operation)
+    {
+        string? userIdValue = User.FindFirst(
+            ClaimTypes.NameIdentifier)?.Value;
+
+        if (!Guid.TryParse(
+            userIdValue,
+            out Guid requesterId))
+        {
+            return Unauthorized();
+        }
+
+        bool allowed = _authorizeEntry.CanExecute(
+            requesterId,
+            keyspace,
+            operation);
+
+        if (!allowed)
+            return Forbid();
+
+        return null;
     }
 }
