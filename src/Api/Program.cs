@@ -24,6 +24,7 @@ builder.Services.AddApiKeyAuthentication(
 
 builder.Services.AddTransient<AuthorizeEntryOperationUseCase>();
 builder.Services.AddTransient<CreateUserUseCase>();
+builder.Services.AddTransient<IssueApiKeyUseCase>();
 
 var app = builder.Build();
 

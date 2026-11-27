@@ -31,6 +31,8 @@ public static class ApiKeyAuthenticationExtensions
                 Path.Combine(directory, "credentials.json")));
 
         services.AddSingleton<ApiKeyTokenService>();
+        services.AddSingleton<IApiKeyTokenService>(
+            sp => sp.GetRequiredService<ApiKeyTokenService>());
         services.AddSingleton<ApiKeyAuthenticationService>();
 
         services.AddAuthentication(
