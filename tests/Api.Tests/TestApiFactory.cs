@@ -8,9 +8,20 @@ namespace KeyValueStore.Api.Tests;
 public sealed class TestApiFactory
     : WebApplicationFactory<Program>
 {
-    public string DataDirectory { get; } = Path.Combine(
-        Path.GetTempPath(),
-        $"KeyValueStoreApiTests-{Guid.NewGuid():N}");
+    private readonly bool _ownsDataDirectory;
+
+    public string DataDirectory { get; }
+
+    public TestApiFactory(string? dataDirectory = null)
+    {
+        _ownsDataDirectory = dataDirectory is null;
+
+        DataDirectory = dataDirectory is null
+            ? Path.Combine(
+                Path.GetTempPath(),
+                $"KeyValueStoreApiTests-{Guid.NewGuid():N}")
+            : Path.GetFullPath(dataDirectory);
+    }
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -20,11 +31,9 @@ public sealed class TestApiFactory
                 new Dictionary<string, string?>
                 {
                     ["Storage:Mode"] = "Persistent",
-
                     ["Storage:FilePath"] = Path.Combine(
                         DataDirectory,
                         "store.log"),
-
                     ["Storage:CacheCapacity"] = "4"
                 });
         });
@@ -42,7 +51,9 @@ public sealed class TestApiFactory
     {
         base.Dispose(disposing);
 
-        if (disposing && Directory.Exists(DataDirectory))
+        if (disposing &&
+            _ownsDataDirectory &&
+            Directory.Exists(DataDirectory))
         {
             Directory.Delete(
                 DataDirectory,
