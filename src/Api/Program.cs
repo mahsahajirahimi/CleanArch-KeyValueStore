@@ -26,6 +26,7 @@ builder.Services.AddTransient<AuthorizeEntryOperationUseCase>();
 builder.Services.AddTransient<CreateUserUseCase>();
 builder.Services.AddTransient<IssueApiKeyUseCase>();
 builder.Services.AddTransient<RevokeApiKeyUseCase>();
+builder.Services.AddTransient<RotateApiKeyUseCase>();
 
 var app = builder.Build();
 
