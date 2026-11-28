@@ -47,6 +47,34 @@ public sealed class EntriesController : ControllerBase
         if (request is null || request.Value is null)
             return BadRequest("A value is required.");
 
+        if (request.TtlSeconds is <= 0)
+        {
+            return BadRequest(new
+            {
+                error = "ttlSeconds must be a positive integer."
+            });
+        }
+
+        if (request.Metadata is not null)
+        {
+            if (request.Metadata.Any(pair =>
+                string.IsNullOrWhiteSpace(pair.Key)))
+            {
+                return BadRequest(new
+                {
+                    error = "metadata keys cannot be empty or whitespace."
+                });
+            }
+
+            if (request.Metadata.Any(pair => pair.Value is null))
+            {
+                return BadRequest(new
+                {
+                    error = "metadata values cannot be null."
+                });
+            }
+        }
+
         _setEntry.Execute(
             keyspace,
             key,
