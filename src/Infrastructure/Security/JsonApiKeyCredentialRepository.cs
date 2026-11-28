@@ -4,11 +4,18 @@ using KeyValueStore.Domain.Security;
 
 namespace KeyValueStore.Infrastructure.Security;
 
+internal enum CredentialWriteStage
+{
+    BeforeTemporaryFileFlush,
+    BeforeReplace
+}
+
 public sealed class JsonApiKeyCredentialRepository
     : IApiKeyCredentialRepository
 {
     private readonly object _sync = new();
     private readonly string _filePath;
+    private readonly Action<CredentialWriteStage>? _onWriteStage;
 
     private Dictionary<Guid, ApiKeyCredential> _credentials;
 
@@ -20,6 +27,13 @@ public sealed class JsonApiKeyCredentialRepository
         DateTimeOffset? RevokedAt);
 
     public JsonApiKeyCredentialRepository(string filePath)
+        : this(filePath, null)
+    {
+    }
+
+    internal JsonApiKeyCredentialRepository(
+        string filePath,
+        Action<CredentialWriteStage>? onWriteStage)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -29,6 +43,7 @@ public sealed class JsonApiKeyCredentialRepository
         }
 
         _filePath = Path.GetFullPath(filePath);
+        _onWriteStage = onWriteStage;
         _credentials = LoadFromFile();
     }
 
@@ -323,8 +338,14 @@ public sealed class JsonApiKeyCredentialRepository
                         WriteIndented = true
                     });
 
+                _onWriteStage?.Invoke(
+                    CredentialWriteStage.BeforeTemporaryFileFlush);
+
                 stream.Flush(flushToDisk: true);
             }
+
+            _onWriteStage?.Invoke(
+                CredentialWriteStage.BeforeReplace);
 
             File.Move(
                 temporaryPath,
