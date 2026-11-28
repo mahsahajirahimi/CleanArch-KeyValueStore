@@ -7,9 +7,16 @@ public sealed class InMemoryKeyValueEntryRepository
     : IKeyValueEntryRepository
 {
     private readonly object _sync = new();
+    private readonly TimeProvider _timeProvider;
 
     private readonly Dictionary<(string Keyspace, string Key),
         KeyValueEntry> _entries = new();
+
+    public InMemoryKeyValueEntryRepository(
+        TimeProvider? timeProvider = null)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     public KeyValueEntry? Get(string keyspace, string key)
     {
@@ -20,7 +27,7 @@ public sealed class InMemoryKeyValueEntryRepository
             if (!_entries.TryGetValue(address, out var entry))
                 return null;
 
-            if (entry.IsExpired(DateTimeOffset.UtcNow))
+            if (entry.IsExpired(_timeProvider.GetUtcNow()))
             {
                 _entries.Remove(address);
                 return null;
@@ -42,7 +49,18 @@ public sealed class InMemoryKeyValueEntryRepository
     {
         lock (_sync)
         {
-            return _entries.Remove((keyspace, key));
+            var address = (keyspace, key);
+
+            if (!_entries.TryGetValue(address, out var entry))
+                return false;
+
+            if (entry.IsExpired(_timeProvider.GetUtcNow()))
+            {
+                _entries.Remove(address);
+                return false;
+            }
+
+            return _entries.Remove(address);
         }
     }
 

@@ -9,6 +9,7 @@ public sealed class LogStructuredKeyValueEntryRepository
 {
     private readonly object _sync = new();
     private readonly AppendOnlyFileStore _log;
+    private readonly TimeProvider _timeProvider;
     private readonly BPlusTree _index = new();
 
     private readonly LruCache<
@@ -17,8 +18,11 @@ public sealed class LogStructuredKeyValueEntryRepository
 
     public LogStructuredKeyValueEntryRepository(
         string filePath,
-        int cacheCapacity = 100)
+        int cacheCapacity = 100,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+
         _cache = new LruCache<
             (string Keyspace, string Key),
             KeyValueEntry>(cacheCapacity);
@@ -42,7 +46,7 @@ public sealed class LogStructuredKeyValueEntryRepository
                 {
                     StoredEntry stored = RequireStoredEntry(record);
 
-                    if (stored.ExpiresAt <= DateTimeOffset.UtcNow)
+                    if (stored.ExpiresAt <= _timeProvider.GetUtcNow())
                     {
                         _index.Delete(record.Keyspace, record.Key);
                     }
@@ -77,7 +81,7 @@ public sealed class LogStructuredKeyValueEntryRepository
             return LoadActiveEntry(
                 keyspace,
                 key,
-                DateTimeOffset.UtcNow);
+                _timeProvider.GetUtcNow());
         }
     }
 
@@ -98,8 +102,13 @@ public sealed class LogStructuredKeyValueEntryRepository
 
         lock (_sync)
         {
-            if (_index.FindOffset(keyspace, key) is null)
+            if (LoadActiveEntry(
+                keyspace,
+                key,
+                _timeProvider.GetUtcNow()) is null)
+            {
                 return false;
+            }
 
             _log.Append(new LogRecord(
                 LogOperation.Delete,
@@ -223,7 +232,7 @@ public sealed class LogStructuredKeyValueEntryRepository
             Keyspace: keyspace,
             Key: entry.Key);
 
-        if (entry.IsExpired(DateTimeOffset.UtcNow))
+        if (entry.IsExpired(_timeProvider.GetUtcNow()))
         {
             _index.Delete(keyspace, entry.Key);
             _cache.Remove(cacheKey);
