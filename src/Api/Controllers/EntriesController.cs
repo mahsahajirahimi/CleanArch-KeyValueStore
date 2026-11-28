@@ -87,15 +87,13 @@ public sealed class EntriesController : ControllerBase
             if (entry is null)
                 return NotFound();
 
-            return Ok(new
-            {
+            return Ok(new EntryResponse(
                 entry.Key,
                 entry.Value,
                 entry.CreatedAt,
                 entry.UpdatedAt,
                 entry.ExpiresAt,
-                entry.Metadata
-            });
+                entry.Metadata));
         });
     }
 
