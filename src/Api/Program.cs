@@ -14,11 +14,29 @@ var storageOptions = StorageOptions.FromConfiguration(
 
 builder.Services.AddKeyValueStoreServices(storageOptions);
 
-string securityDataDirectory =
-    Path.GetDirectoryName(storageOptions.FilePath)
-    ?? Path.Combine(
-        builder.Environment.ContentRootPath,
-        "data");
+string securityDataDirectory;
+
+if (storageOptions.FilePath is not null)
+{
+    securityDataDirectory =
+        Path.GetDirectoryName(storageOptions.FilePath)
+        ?? throw new InvalidOperationException(
+            "Storage:FilePath must refer to a file.");
+}
+else
+{
+    string? configuredSecurityDirectory =
+        builder.Configuration["Security:DataDirectory"];
+
+    securityDataDirectory =
+        string.IsNullOrWhiteSpace(configuredSecurityDirectory)
+            ? Path.Combine(
+                builder.Environment.ContentRootPath,
+                "data")
+            : Path.GetFullPath(
+                configuredSecurityDirectory,
+                builder.Environment.ContentRootPath);
+}
 
 builder.Services.AddSingleton<DataDirectoryLock>(
     _ => DataDirectoryLock.Acquire(
