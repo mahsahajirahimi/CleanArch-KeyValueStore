@@ -10,6 +10,13 @@ internal sealed class AppendOnlyFileStore
 
     private readonly string _filePath;
 
+    private readonly object _appendSync = new();
+
+    private readonly Action<BinaryWriter, byte[]> _writeRecord;
+
+    private bool _appendFaulted;
+
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -18,15 +25,36 @@ internal sealed class AppendOnlyFileStore
     };
 
     public AppendOnlyFileStore(string filePath)
+        : this(filePath, WriteDefaultRecord)
+    {
+    }
+
+    internal AppendOnlyFileStore(
+        string filePath,
+        Action<BinaryWriter, byte[]> writeRecord)
     {
         if (string.IsNullOrWhiteSpace(filePath))
+        {
             throw new ArgumentException(
                 "File path cannot be empty.",
                 nameof(filePath));
+        }
 
         _filePath = Path.GetFullPath(filePath);
+
+        _writeRecord = writeRecord
+            ?? throw new ArgumentNullException(nameof(writeRecord));
     }
 
+    private static void WriteDefaultRecord(
+        BinaryWriter writer,
+        byte[] data)
+    {
+        writer.Write(data.Length);
+        writer.Write(data);
+    }
+
+    
     public long Append(LogRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -36,37 +64,59 @@ internal sealed class AppendOnlyFileStore
             JsonOptions);
 
         if (data.Length > MaxRecordBytes)
+        {
             throw new ArgumentException(
                 "Log record exceeds the maximum allowed size.",
                 nameof(record));
+        }
 
         string directory = Path.GetDirectoryName(_filePath)
             ?? throw new InvalidOperationException(
                 "Invalid log file path.");
 
-        Directory.CreateDirectory(directory);
-
-        using var stream = new FileStream(
-            _filePath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None);
-
-        long offset = stream.Seek(0, SeekOrigin.End);
-
-        using (var writer = new BinaryWriter(
-            stream,
-            Encoding.UTF8,
-            leaveOpen: true))
+        lock (_appendSync)
         {
-            writer.Write(data.Length);
-            writer.Write(data);
-            writer.Flush();
+            if (_appendFaulted)
+            {
+                throw new InvalidOperationException(
+                    "Log writer is faulted. " +
+                    "Restart the repository to recover " +
+                    "the log before writing again.");
+            }
+
+            try
+            {
+                Directory.CreateDirectory(directory);
+
+                using var stream = new FileStream(
+                    _filePath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None);
+
+                long offset = stream.Seek(
+                    0,
+                    SeekOrigin.End);
+
+                using (var writer = new BinaryWriter(
+                    stream,
+                    Encoding.UTF8,
+                    leaveOpen: true))
+                {
+                    _writeRecord(writer, data);
+                    writer.Flush();
+                }
+
+                stream.Flush(flushToDisk: true);
+
+                return offset;
+            }
+            catch
+            {
+                _appendFaulted = true;
+                throw;
+            }
         }
-
-        stream.Flush(flushToDisk: true);
-
-        return offset;
     }
 
     public LogRecord ReadAt(long offset)

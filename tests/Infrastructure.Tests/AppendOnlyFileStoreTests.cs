@@ -309,6 +309,104 @@ public sealed class AppendOnlyFileStoreTests : IDisposable
             new FileInfo(StorePath).Length);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void FailedAppend_ShouldBlockFurtherWrites_AndRecoverOnRestart(
+        bool incompleteHeader)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var repository =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        repository.Upsert(
+            "userA",
+            "name",
+            "Ali",
+            now);
+
+        long validLength = new FileInfo(StorePath).Length;
+
+        var faultyStore = new AppendOnlyFileStore(
+            StorePath,
+            (writer, data) =>
+            {
+                if (incompleteHeader)
+                {
+                    writer.Write((short)data.Length);
+                }
+                else
+                {
+                    writer.Write(data.Length);
+
+                    writer.Write(
+                        data,
+                        0,
+                        Math.Min(3, data.Length));
+                }
+
+                writer.Flush();
+
+                throw new IOException(
+                    "Simulated partial write failure.");
+            });
+
+        var failedRecord = new LogRecord(
+            LogOperation.Delete,
+            "userA",
+            "name",
+            null);
+
+        Assert.Throws<IOException>(() =>
+            faultyStore.Append(failedRecord));
+
+        byte[] bytesAfterFailure =
+            File.ReadAllBytes(StorePath);
+
+        Assert.True(
+            bytesAfterFailure.Length > validLength);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            faultyStore.Append(failedRecord));
+
+        Assert.Equal(
+            bytesAfterFailure,
+            File.ReadAllBytes(StorePath));
+
+        var restarted =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        Assert.Equal(
+            "Ali",
+            restarted.Get("userA", "name")?.Value);
+
+        Assert.Single(Directory.GetFiles(
+            _testDirectory,
+            "*.tail"));
+
+        Assert.Equal(
+            validLength,
+            new FileInfo(StorePath).Length);
+
+        restarted.Upsert(
+            "userA",
+            "city",
+            "Tehran",
+            now);
+
+        var restartedAgain =
+            new LogStructuredKeyValueEntryRepository(StorePath);
+
+        Assert.Equal(
+            "Ali",
+            restartedAgain.Get("userA", "name")?.Value);
+
+        Assert.Equal(
+            "Tehran",
+            restartedAgain.Get("userA", "city")?.Value);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))
