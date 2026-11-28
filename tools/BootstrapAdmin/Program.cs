@@ -1,4 +1,5 @@
 ﻿using KeyValueStore.Infrastructure.Security;
+using KeyValueStore.Infrastructure.Storage;
 
 bool isProvision =
     args.Length == 3 &&
@@ -27,17 +28,8 @@ try
     string dataDirectory = Path.GetFullPath(
         isProvision ? args[2] : args[1]);
 
-    Directory.CreateDirectory(dataDirectory);
-
-    string lockPath = Path.Combine(
-        dataDirectory,
-        "bootstrap.lock");
-
-    using var bootstrapLock = new FileStream(
-        lockPath,
-        FileMode.OpenOrCreate,
-        FileAccess.ReadWrite,
-        FileShare.None);
+    using var dataDirectoryLock =
+        DataDirectoryLock.Acquire(dataDirectory);
 
     var users = new JsonUserAccountRepository(
         Path.Combine(dataDirectory, "users.json"));

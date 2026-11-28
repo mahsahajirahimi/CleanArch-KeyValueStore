@@ -2,6 +2,7 @@ using KeyValueStore.Api.Configuration;
 using KeyValueStore.Api.Extensions;
 using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Application.UseCases;
+using KeyValueStore.Infrastructure.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,10 @@ string securityDataDirectory =
         builder.Environment.ContentRootPath,
         "data");
 
+builder.Services.AddSingleton<DataDirectoryLock>(
+    _ => DataDirectoryLock.Acquire(
+        securityDataDirectory));
+
 builder.Services.AddApiKeyAuthentication(
     securityDataDirectory);
 
@@ -29,6 +34,8 @@ builder.Services.AddTransient<RevokeApiKeyUseCase>();
 builder.Services.AddTransient<RotateApiKeyUseCase>();
 
 var app = builder.Build();
+
+app.Services.GetRequiredService<DataDirectoryLock>();
 
 app.Services.GetRequiredService<IKeyValueEntryRepository>();
 app.Services.GetRequiredService<IUserAccountRepository>();
