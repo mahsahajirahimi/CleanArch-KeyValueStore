@@ -309,6 +309,21 @@ public sealed class RevokeApiKeyUseCaseTests
             return copy;
         }
 
+        public bool Revoke(Guid keyId, DateTimeOffset now)
+        {
+            var credential = GetById(keyId)
+                ?? throw new InvalidOperationException(
+                    "API key does not exist.");
+
+            if (credential.IsRevoked)
+                return false;
+
+            credential.Revoke(now);
+            Save(credential);
+
+            return true;
+        }
+
         public void Rotate(
             Guid oldKeyId,
             ApiKeyCredential replacement,

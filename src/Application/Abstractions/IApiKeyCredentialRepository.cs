@@ -10,6 +10,8 @@ public interface IApiKeyCredentialRepository
 
     void Save(ApiKeyCredential credential);
 
+    bool Revoke(Guid keyId, DateTimeOffset now);
+
     void Rotate(
         Guid oldKeyId,
         ApiKeyCredential replacement,

@@ -289,6 +289,62 @@ public sealed class AdminApiKeyLifecycleTests
             invalidRole.StatusCode);
     }
 
+    [Fact]
+    public async Task ConcurrentRevokeRequests_ShouldBothReturn204()
+    {
+        using var factory = new TestApiFactory();
+
+        var (_, adminKey) = SeedUser(
+            factory, "team-a", UserRole.Admin);
+
+        var (readerId, readerKey) = SeedUser(
+            factory, "team-a", UserRole.Reader);
+
+        Guid keyId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var credentials = scope.ServiceProvider
+                .GetRequiredService<IApiKeyCredentialRepository>();
+
+            keyId = Assert.Single(
+                credentials.GetByUserId(readerId)).Id;
+        }
+
+        using var admin = CreateClient(factory, adminKey);
+
+        string url = $"/api/admin/api-keys/{keyId}";
+
+        var requests = new[]
+        {
+            admin.DeleteAsync(url),
+            admin.DeleteAsync(url)
+        };
+
+        HttpResponseMessage[] responses = await Task.WhenAll(requests);
+
+        try
+        {
+            Assert.All(responses, response =>
+                Assert.Equal(
+                    HttpStatusCode.NoContent,
+                    response.StatusCode));
+        }
+        finally
+        {
+            foreach (var response in responses)
+                response.Dispose();
+        }
+
+        using var reader = CreateClient(factory, readerKey);
+
+        using var check = await reader.GetAsync(
+            "/api/keyspaces/team-a/entries/missing");
+
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            check.StatusCode);
+    }
+
     private static (Guid UserId, string ApiKey) SeedUser(
         TestApiFactory factory,
         string keyspace,

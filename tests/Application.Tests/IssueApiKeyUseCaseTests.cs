@@ -264,6 +264,12 @@ public sealed class IssueApiKeyUseCaseTests
             _credentials[credential.Id] = credential;
         }
 
+        public bool Revoke(Guid keyId, DateTimeOffset now)
+        {
+            throw new NotSupportedException(
+                "Revocation is not used by this test.");
+        }
+
         public void Rotate(
             Guid oldKeyId,
             ApiKeyCredential replacement,

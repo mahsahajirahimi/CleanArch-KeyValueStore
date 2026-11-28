@@ -85,6 +85,45 @@ public sealed class JsonApiKeyCredentialRepository
         }
     }
 
+    public bool Revoke(Guid keyId, DateTimeOffset now)
+    {
+        if (keyId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "API key ID cannot be empty.",
+                nameof(keyId));
+        }
+
+        lock (_sync)
+        {
+            if (!_credentials.TryGetValue(
+                keyId,
+                out var existing))
+            {
+                throw new InvalidOperationException(
+                    "API key does not exist.");
+            }
+
+            if (existing.IsRevoked)
+                return false;
+
+            var revoked = Clone(existing);
+            revoked.Revoke(now);
+
+            var updated =
+                new Dictionary<Guid, ApiKeyCredential>(
+                    _credentials)
+                {
+                    [keyId] = revoked
+                };
+
+            WriteToFile(updated);
+            _credentials = updated;
+
+            return true;
+        }
+    }
+
     public void Rotate(
         Guid oldKeyId,
         ApiKeyCredential replacement,

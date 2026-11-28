@@ -69,12 +69,6 @@ public sealed class RevokeApiKeyUseCase
                 "Not authorized to revoke API keys.");
         }
 
-        if (credential.IsRevoked)
-            return false;
-
-        credential.Revoke(now);
-        _credentials.Save(credential);
-
-        return true;
+        return _credentials.Revoke(credential.Id, now);
     }
 }
