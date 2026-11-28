@@ -1,17 +1,31 @@
 ﻿using KeyValueStore.Infrastructure.Security;
 
-if (args.Length != 2)
+bool isProvision =
+    args.Length == 3 &&
+    string.Equals(
+        args[0],
+        "provision",
+        StringComparison.OrdinalIgnoreCase);
+
+if (args.Length != 2 && !isProvision)
 {
     Console.Error.WriteLine(
-        "Usage: BootstrapAdmin <keyspace> <data-directory>");
+        "Usage:");
+    Console.Error.WriteLine(
+        "  BootstrapAdmin <keyspace> <data-directory>");
+    Console.Error.WriteLine(
+        "  BootstrapAdmin provision <keyspace> <data-directory>");
 
     return 2;
 }
 
 try
 {
-    string keyspace = args[0].Trim();
-    string dataDirectory = Path.GetFullPath(args[1]);
+    string keyspace = (
+        isProvision ? args[1] : args[0]).Trim();
+
+    string dataDirectory = Path.GetFullPath(
+        isProvision ? args[2] : args[1]);
 
     Directory.CreateDirectory(dataDirectory);
 
@@ -36,11 +50,19 @@ try
         credentials,
         new ApiKeyTokenService());
 
-    BootstrapAdminResult result = bootstrapper.Execute(
-        keyspace,
-        DateTimeOffset.UtcNow);
+    DateTimeOffset now = DateTimeOffset.UtcNow;
 
-    Console.WriteLine("Initial admin created.");
+    BootstrapAdminResult result = isProvision
+        ? bootstrapper.ProvisionAdditionalKeyspace(
+            keyspace, now)
+        : bootstrapper.Execute(keyspace, now);
+
+    Console.WriteLine(
+        isProvision
+            ? "Additional keyspace admin created."
+            : "Initial admin created.");
+
+    Console.WriteLine($"Keyspace: {keyspace}");
     Console.WriteLine($"User ID: {result.UserId}");
     Console.WriteLine($"Key ID: {result.KeyId}");
 

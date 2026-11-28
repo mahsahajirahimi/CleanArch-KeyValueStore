@@ -225,4 +225,23 @@ public sealed class JsonUserAccountRepository
             return _users.Count > 0;
         }
     }
+
+    public bool HasKeyspace(string keyspace)
+    {
+        if (string.IsNullOrWhiteSpace(keyspace))
+        {
+            throw new ArgumentException(
+                "Keyspace cannot be empty.",
+                nameof(keyspace));
+        }
+
+        lock (_sync)
+        {
+            return _users.Values.Any(user =>
+                string.Equals(
+                    user.Keyspace,
+                    keyspace,
+                    StringComparison.Ordinal));
+        }
+    }
 }
