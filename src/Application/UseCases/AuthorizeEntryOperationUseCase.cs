@@ -35,4 +35,19 @@ public sealed class AuthorizeEntryOperationUseCase
             requestedKeyspace,
             operation);
     }
+
+    public void EnsureAuthorized(
+        Guid requesterId,
+        string requestedKeyspace,
+        EntryOperation operation)
+    {
+        if (!CanExecute(
+            requesterId,
+            requestedKeyspace,
+            operation))
+        {
+            throw new UnauthorizedAccessException(
+                "Not authorized to perform this entry operation.");
+        }
+    }
 }

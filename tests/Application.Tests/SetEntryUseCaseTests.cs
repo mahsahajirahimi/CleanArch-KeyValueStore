@@ -1,6 +1,6 @@
-
 using KeyValueStore.Application.Tests.Fakes;
 using KeyValueStore.Application.UseCases;
+using KeyValueStore.Domain.Security;
 using Xunit;
 
 namespace KeyValueStore.Application.Tests;
@@ -10,11 +10,15 @@ public class SetEntryUseCaseTests
     [Fact]
     public void Set_ShouldPassValuesToRepository()
     {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new SetEntryUseCase(repository);
+        var (repository, useCase, requesterId) = CreateContext();
         var now = DateTimeOffset.UnixEpoch;
 
-        useCase.Execute("userA", "name", "Ali", now);
+        useCase.Execute(
+            requesterId,
+            "userA",
+            "name",
+            "Ali",
+            now);
 
         var call = repository.LastUpsert;
 
@@ -30,11 +34,11 @@ public class SetEntryUseCaseTests
     [Fact]
     public void Set_ShouldCalculateExpirationFromTtl()
     {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new SetEntryUseCase(repository);
+        var (repository, useCase, requesterId) = CreateContext();
         var now = DateTimeOffset.UnixEpoch;
 
         useCase.Execute(
+            requesterId,
             "userA",
             "name",
             "Ali",
@@ -54,11 +58,11 @@ public class SetEntryUseCaseTests
     [InlineData(-5)]
     public void Set_ShouldRejectInvalidTtl(int ttlSeconds)
     {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new SetEntryUseCase(repository);
+        var (repository, useCase, requesterId) = CreateContext();
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             useCase.Execute(
+                requesterId,
                 "userA",
                 "name",
                 "Ali",
@@ -71,11 +75,11 @@ public class SetEntryUseCaseTests
     [Fact]
     public void Set_ShouldRejectEmptyKeyspace()
     {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new SetEntryUseCase(repository);
+        var (repository, useCase, requesterId) = CreateContext();
 
         Assert.Throws<ArgumentException>(() =>
             useCase.Execute(
+                requesterId,
                 "",
                 "name",
                 "Ali",
@@ -87,8 +91,7 @@ public class SetEntryUseCaseTests
     [Fact]
     public void Set_ShouldForwardMetadataToRepository()
     {
-        var repository = new FakeKeyValueEntryRepository();
-        var useCase = new SetEntryUseCase(repository);
+        var (repository, useCase, requesterId) = CreateContext();
         var now = DateTimeOffset.UnixEpoch;
 
         var metadata = new Dictionary<string, string>
@@ -98,6 +101,7 @@ public class SetEntryUseCaseTests
         };
 
         useCase.Execute(
+            requesterId,
             "userA",
             "name",
             "Ali",
@@ -121,5 +125,93 @@ public class SetEntryUseCaseTests
         Assert.Equal(
             "development",
             passedMetadata["environment"]);
+    }
+
+    [Fact]
+    public void Set_ShouldRejectNullValue()
+    {
+        var (repository, useCase, requesterId) = CreateContext();
+
+        Assert.Throws<ArgumentException>(() =>
+            useCase.Execute(
+                requesterId,
+                "userA",
+                "name",
+                null,
+                DateTimeOffset.UnixEpoch));
+
+        Assert.Null(repository.LastUpsert);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Set_ShouldRejectInvalidMetadataKeys(
+        string metadataKey)
+    {
+        var (repository, useCase, requesterId) = CreateContext();
+
+        var metadata = new Dictionary<string, string>
+        {
+            [metadataKey] = "value"
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            useCase.Execute(
+                requesterId,
+                "userA",
+                "name",
+                "Ali",
+                DateTimeOffset.UnixEpoch,
+                metadata: metadata));
+
+        Assert.Null(repository.LastUpsert);
+    }
+
+    [Fact]
+    public void Set_ShouldRejectNullMetadataValue()
+    {
+        var (repository, useCase, requesterId) = CreateContext();
+
+        var metadata = new Dictionary<string, string>
+        {
+            ["source"] = null!
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            useCase.Execute(
+                requesterId,
+                "userA",
+                "name",
+                "Ali",
+                DateTimeOffset.UnixEpoch,
+                metadata: metadata));
+
+        Assert.Null(repository.LastUpsert);
+    }
+
+    private static (
+        FakeKeyValueEntryRepository Repository,
+        SetEntryUseCase UseCase,
+        Guid RequesterId
+    ) CreateContext()
+    {
+        var repository = new FakeKeyValueEntryRepository();
+        var users = new FakeUserAccountRepository();
+
+        var writer = new UserAccount(
+            Guid.NewGuid(),
+            "userA",
+            UserRole.Writer);
+
+        users.Save(writer);
+
+        var authorization =
+            new AuthorizeEntryOperationUseCase(users);
+
+        var useCase =
+            new SetEntryUseCase(repository, authorization);
+
+        return (repository, useCase, writer.Id);
     }
 }

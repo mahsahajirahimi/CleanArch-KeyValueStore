@@ -1,26 +1,48 @@
 using KeyValueStore.Application.Abstractions;
 using KeyValueStore.Domain.Aggregates;
+using KeyValueStore.Domain.Security;
 
 namespace KeyValueStore.Application.UseCases;
 
 public class GetEntryUseCase
 {
     private readonly IKeyValueEntryRepository _repository;
+    private readonly AuthorizeEntryOperationUseCase _authorization;
 
-    public GetEntryUseCase(IKeyValueEntryRepository repository)
+    public GetEntryUseCase(
+        IKeyValueEntryRepository repository,
+        AuthorizeEntryOperationUseCase authorization)
     {
-        _repository = repository;
+        _repository = repository
+            ?? throw new ArgumentNullException(nameof(repository));
+
+        _authorization = authorization
+            ?? throw new ArgumentNullException(nameof(authorization));
     }
 
-    public KeyValueEntry? Execute(string keyspace, string key)
+    public KeyValueEntry? Execute(
+        Guid requesterId,
+        string keyspace,
+        string key)
     {
         if (string.IsNullOrWhiteSpace(keyspace))
+        {
             throw new ArgumentException(
-                "Keyspace cannot be empty.", nameof(keyspace));
+                "Keyspace cannot be empty.",
+                nameof(keyspace));
+        }
 
         if (string.IsNullOrWhiteSpace(key))
+        {
             throw new ArgumentException(
-                "Key cannot be empty.", nameof(key));
+                "Key cannot be empty.",
+                nameof(key));
+        }
+
+        _authorization.EnsureAuthorized(
+            requesterId,
+            keyspace,
+            EntryOperation.Read);
 
         return _repository.Get(keyspace, key);
     }

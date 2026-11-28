@@ -2,7 +2,6 @@ using System.Security.Claims;
 using KeyValueStore.Api.Authentication;
 using KeyValueStore.Api.Contracts;
 using KeyValueStore.Application.UseCases;
-using KeyValueStore.Domain.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,18 +16,15 @@ public sealed class EntriesController : ControllerBase
     private readonly SetEntryUseCase _setEntry;
     private readonly GetEntryUseCase _getEntry;
     private readonly DeleteEntryUseCase _deleteEntry;
-    private readonly AuthorizeEntryOperationUseCase _authorizeEntry;
 
     public EntriesController(
         SetEntryUseCase setEntry,
         GetEntryUseCase getEntry,
-        DeleteEntryUseCase deleteEntry,
-        AuthorizeEntryOperationUseCase authorizeEntry)
+        DeleteEntryUseCase deleteEntry)
     {
         _setEntry = setEntry;
         _getEntry = getEntry;
         _deleteEntry = deleteEntry;
-        _authorizeEntry = authorizeEntry;
     }
 
     [HttpPut("{key}")]
@@ -37,53 +33,43 @@ public sealed class EntriesController : ControllerBase
         string key,
         [FromBody] SetEntryRequest request)
     {
-        IActionResult? denial = CheckAccess(
-            keyspace,
-            EntryOperation.Write);
-
-        if (denial is not null)
-            return denial;
-
-        if (request is null || request.Value is null)
-            return BadRequest("A value is required.");
-
-        if (request.TtlSeconds is <= 0)
+        return ExecuteAsRequester(requesterId =>
         {
-            return BadRequest(new
+            try
             {
-                error = "ttlSeconds must be a positive integer."
-            });
-        }
+                _setEntry.Execute(
+                    requesterId,
+                    keyspace,
+                    key,
+                    request?.Value,
+                    DateTimeOffset.UtcNow,
+                    request?.TtlSeconds,
+                    request?.Metadata);
 
-        if (request.Metadata is not null)
-        {
-            if (request.Metadata.Any(pair =>
-                string.IsNullOrWhiteSpace(pair.Key)))
+                return NoContent();
+            }
+            catch (ArgumentOutOfRangeException ex)
+                when (ex.ParamName == "ttlSeconds")
             {
                 return BadRequest(new
                 {
-                    error = "metadata keys cannot be empty or whitespace."
+                    error = "ttlSeconds must be a positive integer."
                 });
             }
-
-            if (request.Metadata.Any(pair => pair.Value is null))
+            catch (ArgumentException ex)
+                when (ex.ParamName == "metadata")
             {
                 return BadRequest(new
                 {
-                    error = "metadata values cannot be null."
+                    error = ex.Message
                 });
             }
-        }
-
-        _setEntry.Execute(
-            keyspace,
-            key,
-            request.Value,
-            DateTimeOffset.UtcNow,
-            request.TtlSeconds,
-            request.Metadata);
-
-        return NoContent();
+            catch (ArgumentException ex)
+                when (ex.ParamName == "value")
+            {
+                return BadRequest("A value is required.");
+            }
+        });
     }
 
     [HttpGet("{key}")]
@@ -91,26 +77,25 @@ public sealed class EntriesController : ControllerBase
         string keyspace,
         string key)
     {
-        IActionResult? denial = CheckAccess(
-            keyspace,
-            EntryOperation.Read);
-
-        if (denial is not null)
-            return denial;
-
-        var entry = _getEntry.Execute(keyspace, key);
-
-        if (entry is null)
-            return NotFound();
-
-        return Ok(new
+        return ExecuteAsRequester(requesterId =>
         {
-            entry.Key,
-            entry.Value,
-            entry.CreatedAt,
-            entry.UpdatedAt,
-            entry.ExpiresAt,
-            entry.Metadata
+            var entry = _getEntry.Execute(
+                requesterId,
+                keyspace,
+                key);
+
+            if (entry is null)
+                return NotFound();
+
+            return Ok(new
+            {
+                entry.Key,
+                entry.Value,
+                entry.CreatedAt,
+                entry.UpdatedAt,
+                entry.ExpiresAt,
+                entry.Metadata
+            });
         });
     }
 
@@ -119,24 +104,22 @@ public sealed class EntriesController : ControllerBase
         string keyspace,
         string key)
     {
-        IActionResult? denial = CheckAccess(
-            keyspace,
-            EntryOperation.Delete);
+        return ExecuteAsRequester(requesterId =>
+        {
+            bool deleted = _deleteEntry.Execute(
+                requesterId,
+                keyspace,
+                key);
 
-        if (denial is not null)
-            return denial;
+            if (!deleted)
+                return NotFound();
 
-        bool deleted = _deleteEntry.Execute(keyspace, key);
-
-        if (!deleted)
-            return NotFound();
-
-        return NoContent();
+            return NoContent();
+        });
     }
 
-    private IActionResult? CheckAccess(
-        string keyspace,
-        EntryOperation operation)
+    private IActionResult ExecuteAsRequester(
+        Func<Guid, IActionResult> action)
     {
         string? userIdValue = User.FindFirst(
             ClaimTypes.NameIdentifier)?.Value;
@@ -148,14 +131,13 @@ public sealed class EntriesController : ControllerBase
             return Unauthorized();
         }
 
-        bool allowed = _authorizeEntry.CanExecute(
-            requesterId,
-            keyspace,
-            operation);
-
-        if (!allowed)
+        try
+        {
+            return action(requesterId);
+        }
+        catch (UnauthorizedAccessException)
+        {
             return Forbid();
-
-        return null;
+        }
     }
 }
